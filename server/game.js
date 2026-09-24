@@ -164,7 +164,7 @@ export class Game {
       case 'clan': return this.clanAction(p, m);
       case 'jettison': return this.jettison(p, m.item, m.qty | 0);
       case 'lb': return this.leaderboard(conn);
-      case 'ap': return this.setAutopilot(p, m);
+      case 'ap': return m.nearest ? this.apNearestStation(p) : this.setAutopilot(p, m);
     }
   }
 
@@ -440,53 +440,69 @@ export class Game {
     return { x: ap.x, y: ap.y };
   }
 
-  // 오토파일럿 — 입력 생성
-  runAutopilot(p) {
-    const tp = this.apTargetPos(p);
-    let dx = tp.x - p.x, dy = tp.y - p.y;
-    const d = Math.hypot(dx, dy);
-    const arrive = p.ap.kind === 'station' ? DOCK_RANGE * 0.7 : p.ap.kind === 'point' || p.ap.kind === 'system' ? 1500 : p.ap.kind === 'planet' ? (this.world.bodies[p.ap.id].r + 900) : 600;
-    // 항성 회피
-    let aimX = tp.x, aimY = tp.y;
+  // 공용 항법: 목표 지점까지 조향 · 워프 판단 · 감속 (플레이어 오토파일럿과 봇이 함께 사용)
+  navigate(e, tx, ty, arrive) {
+    const dx = tx - e.x, dy = ty - e.y;
+    const d = Math.hypot(dx, dy) || 1;
+    // 항성 회피: 경로가 항성을 관통하면 옆으로 돌아가는 경유점을 조준
+    let aimX = tx, aimY = ty;
     for (const s of this.world.systems) {
-      const sx = s.x - p.x, sy = s.y - p.y;
-      const proj = (sx * dx + sy * dy) / (d || 1);
+      const sx = s.x - e.x, sy = s.y - e.y;
+      const proj = (sx * dx + sy * dy) / d;
       if (proj <= 0 || proj >= d) continue;
-      const px = dx / d * proj, py = dy / d * proj;
-      const off = Math.hypot(sx - px, sy - py);
+      const px = (dx / d) * proj, py = (dy / d) * proj;
       const safe = s.starR * 3;
-      if (off < safe) {
-        let nx = px - sx, ny = py - sy; const nl = Math.hypot(nx, ny) || 1;
-        if (nl < 1) { nx = -dy; ny = dx; }
+      if (Math.hypot(sx - px, sy - py) < safe) {
+        let nx = px - sx, ny = py - sy;
+        let nl = Math.hypot(nx, ny);
+        if (nl < 1) { nx = -dy; ny = dx; nl = d; }
         aimX = s.x + (nx / nl) * safe * 1.3; aimY = s.y + (ny / nl) * safe * 1.3;
         break;
       }
     }
-    let aim = Math.atan2(aimY - p.y, aimX - p.x);
-    const aligned = Math.abs(angDiff(aim, p.a)) < 0.12;
-    const sp = Math.hypot(p.vx, p.vy);
+    let aim = Math.atan2(aimY - e.y, aimX - e.x);
+    const sp = Math.hypot(e.vx, e.vy);
     let keys = 0;
-    if (p.warp === WARP.ACTIVE) {
-      if (d < p.spec.warpSpeed * 0.35 + 1200 + arrive) p.warp = WARP.EXIT;
-    } else if (p.warp === WARP.NONE) {
-      if (d > 16000 && aligned) { p.warp = WARP.CHARGE; p.warpT = p.spec.warpCharge; }
+    if (e.warp === WARP.ACTIVE) {
+      if (d < e.spec.warpSpeed * 0.35 + 1200 + arrive) e.warp = WARP.EXIT;
+    } else if (e.warp === WARP.NONE) {
+      if (d > 10000 && Math.abs(angDiff(aim, e.a)) < 0.15) { e.warp = WARP.CHARGE; e.warpT = e.spec.warpCharge; }
       if (d > arrive) {
-        // 목표 속도 벡터를 향해 조향 (감속 포함)
-        const want = Math.min(p.spec.maxSpeed, Math.sqrt(2 * p.spec.accel * 0.6 * Math.max(0, d - arrive * 0.5)) + 30);
-        const dvx = (dx / d) * want - p.vx, dvy = (dy / d) * want - p.vy;
-        const dv = Math.hypot(dvx, dvy);
-        if (d < 12000 && dv > 40) {
+        const want = Math.min(e.spec.maxSpeed, Math.sqrt(2 * e.spec.accel * 0.6 * Math.max(0, d - arrive * 0.5)) + 30);
+        const dvx = (dx / d) * want - e.vx, dvy = (dy / d) * want - e.vy;
+        if (d < 12000 && Math.hypot(dvx, dvy) > 40) {
           aim = Math.atan2(dvy, dvx);
-          if (Math.abs(angDiff(aim, p.a)) < 0.5) keys = K.UP;
-        } else if (Math.abs(angDiff(aim, p.a)) < 0.6) keys = K.UP;
+          if (Math.abs(angDiff(aim, e.a)) < 0.5) keys = K.UP;
+        } else if (Math.abs(angDiff(aim, e.a)) < 0.6) keys = K.UP;
       }
     }
-    p.apKeys = keys; p.apAim = aim;
-    if (d <= arrive && p.warp === WARP.NONE && sp < 320) {
+    return { keys, aim, d, arrived: d <= arrive && e.warp === WARP.NONE && sp < 320 };
+  }
+
+  // 오토파일럿 — 입력 생성
+  runAutopilot(p) {
+    const tp = this.apTargetPos(p);
+    const k = p.ap.kind;
+    const arrive = k === 'station' ? DOCK_RANGE * 0.7 : k === 'point' || k === 'system' ? 1500 : k === 'planet' ? (this.world.bodies[p.ap.id].r + 900) : 600;
+    const nav = this.navigate(p, tp.x, tp.y, arrive);
+    p.apKeys = nav.keys; p.apAim = nav.aim;
+    if (nav.arrived) {
       const ap = p.ap; p.ap = null;
       if (ap.kind === 'station') { const st = this.stById[ap.id]; if (st.sys === p.sys) return this.dock(p, st); }
       this.toast(p, `목적지 도착: ${ap.name}`, 'good');
     }
+  }
+
+  // 가장 가까운 스테이션으로 오토파일럿
+  apNearestStation(p) {
+    const T = this.time();
+    let best = null, bd = Infinity;
+    for (const st of this.world.stations) {
+      const sp = bodyPos(st, this.world.bodies, T);
+      const d = Math.hypot(sp.x - p.x, sp.y - p.y);
+      if (d < bd) { bd = d; best = st; }
+    }
+    if (best) this.setAutopilot(p, { kind: 'station', id: best.id });
   }
 
   // ------------------------------------------------------------
@@ -1019,24 +1035,43 @@ export class Game {
   //  NPC / 이상신호 스폰
   // ------------------------------------------------------------
   setupSpawns() {
+    const T = { hi: ['drone', 'drone', 'swarm', 'swarm', 'swarm'], mid: ['drone', 'drone', 'raider', 'raider', 'swarm', 'swarm', 'swarm', 'swarm'],
+      low: ['raider', 'raider', 'enforcer', 'gunship', 'swarm', 'swarm', 'swarm', 'swarm'], nul: ['raider', 'enforcer', 'enforcer', 'gunship', 'gunship', 'swarm', 'swarm', 'swarm', 'swarm', 'swarm'] };
     for (const belt of this.world.belts) {
       const sec = this.sysById[belt.sys].sec;
       if (sec >= 0.8) continue;
-      const n = sec >= 0.5 ? 2 : sec > 0.2 ? 3 : sec > 0 ? 4 : 5;
-      for (let i = 0; i < n; i++) {
-        let type;
-        if (sec >= 0.5) type = 'drone';
-        else if (sec > 0.2) type = Math.random() < 0.65 ? 'drone' : 'raider';
-        else if (sec > 0) type = pick(['drone', 'raider', 'raider', 'enforcer']);
-        else type = pick(['raider', 'raider', 'enforcer', 'enforcer']);
-        this.spawnSlots.push({ belt: belt.id, type, respawnAt: now() + rand(0, 5), npc: null, delay: 50 });
-      }
+      const list = sec >= 0.5 ? T.hi : sec > 0.2 ? T.mid : sec > 0 ? T.low : T.nul;
+      for (const type of list) this.spawnSlots.push({ belt: belt.id, type, respawnAt: now() + rand(0, 8), npc: null, delay: type === 'swarm' ? 35 : 45 });
     }
     // 널섹마다 보스 하나
     for (const sys of this.world.systems) {
       if (sys.sec > 0 || !sys.belts.length) continue;
       this.spawnSlots.push({ belt: pick(sys.belts), type: 'kaiju', respawnAt: now() + rand(10, 60), npc: null, delay: 600 });
     }
+    // 하이섹 보안군 순찰대
+    for (const sys of this.world.systems) {
+      if (sys.sec < 0.5) continue;
+      const n = sys.sec >= 0.8 ? 3 : 4;
+      for (let i = 0; i < n; i++) this.spawnSlots.push({ sys: sys.id, type: 'police', respawnAt: now() + rand(0, 5), npc: null, delay: 60 });
+    }
+    // 로그 파일럿 봇
+    const botCount = Math.max(0, Number(process.env.BOT_COUNT ?? 30));
+    this.botSlots = [];
+    for (let i = 0; i < botCount; i++) this.botSlots.push({ npc: null, respawnAt: now() + rand(0, 25) });
+    this.botDests = this.world.belts.filter((b) => this.sysById[b.sys].sec < 0.6);
+  }
+
+  slotSpawnPos(slot) {
+    if (slot.belt) {
+      const belt = this.beltById[slot.belt];
+      const g = Math.random() * Math.PI * 2, d = Math.random() * belt.r;
+      return { x: belt.x + Math.cos(g) * d, y: belt.y + Math.sin(g) * d };
+    }
+    const sys = this.sysById[slot.sys];
+    const stId = sys.stations.length ? pick(sys.stations) : null;
+    const base = stId ? bodyPos(this.stById[stId], this.world.bodies, this.time()) : { x: sys.x + 15000, y: sys.y };
+    const g = Math.random() * Math.PI * 2;
+    return { x: base.x + Math.cos(g) * rand(1500, 4000), y: base.y + Math.sin(g) * rand(1500, 4000) };
   }
 
   spawnNpc(type, x, y, slot, expires = 0) {
@@ -1044,12 +1079,95 @@ export class Game {
     const n = {
       id: this.id('n'), npc: true, type, spec, x, y, vx: 0, vy: 0, a: Math.random() * 6.28,
       hull: spec.hull, shield: spec.shield, homeX: x, homeY: y, slot, target: null, cd: rand(0.5, 1.5), cd2: 2,
-      wanderX: x, wanderY: y, wanderT: 0, lastHitT: 0, expires, warp: 0, keys: 0, aim: 0, sleep: false, orbitDir: Math.random() < 0.5 ? 1 : -1,
-      sys: null, sec: 0,
+      wanderX: x, wanderY: y, wanderT: 0, lastHitT: 0, expires, warp: 0, warpT: 0, keys: 0, aim: 0, sleep: false, orbitDir: Math.random() < 0.5 ? 1 : -1,
+      sys: null, sec: 0, scanT: Math.random() * 0.5, sysT: 0,
     };
-    for (const s of this.world.systems) if (Math.hypot(s.x - x, s.y - y) < SYSTEM_RADIUS) { n.sys = s.id; n.sec = s.sec; }
+    this.updateNpcSys(n);
     this.npcs.set(n.id, n);
     return n;
+  }
+
+  updateNpcSys(n) {
+    n.sys = null; n.sec = 0;
+    let nd = Infinity;
+    for (const s of this.world.systems) {
+      const d = Math.hypot(s.x - n.x, s.y - n.y);
+      if (d < SYSTEM_RADIUS && d < nd) { nd = d; n.sys = s.id; n.sec = s.sec; }
+    }
+  }
+
+  // ------------------------------------------------------------
+  //  로그 파일럿 봇 — 플레이어 기체를 몰고 성계 사이를 워프로 이동하는 적대 AI
+  // ------------------------------------------------------------
+  spawnBot(slot) {
+    const roll = Math.random();
+    const ace = roll < 0.08;
+    const shipType = ace ? pick(['oni', 'leviathan']) : pick(['razor', 'razor', 'katana', 'katana', 'katana', 'ronin', 'ronin', 'phantom', 'drill', 'mule']);
+    const base = SHIPS[shipType];
+    const range = Math.max(...base.hardpoints.map(([w]) => WEAPONS[w].speed * WEAPONS[w].life)) * 0.8;
+    const spec = {
+      ...base, faction: 'pirate', aggro: ace ? 3000 : 2500, range,
+      bounty: Math.round((900 + base.price * 0.045) * (ace ? 1.5 : 1)),
+      loot: [[pick(['neonium', 'voidstone', 'titanite', 'plasma', 'chips']), 0.9, 3, 12], ['datashard', 0.4, 1, 3], ['cyberware', ace ? 0.8 : 0.15, 1, 3], ['quantum', ace ? 0.7 : 0.05, 1, 4]],
+    };
+    const PRE = ['Neon', 'Ghost', 'Chrome', 'Void', 'Glitch', 'Razor', 'Hex', 'Nova', 'Zero', 'Byte', 'Static', 'Viper', 'Shade', 'Kuro', 'Akira', 'Rogue', 'Null', 'Echo', 'Blitz', 'Kaiser', '네온', '크롬', '검은', '독'];
+    const SUF = ['_Runner', 'Fang', 'X', '_77', '-9', 'Wolf', 'Ronin', 'Jack', 'Kid', '_2099', 'Byte', '뱀', '늑대', '까마귀', 'Zer0'];
+    const name = (ace ? 'ACE_' : '') + pick(PRE) + pick(SUF);
+    const tag = pick(['GLCH', 'RZR', 'VOID', 'HEX', '0DAY', 'KRKN', 'BLK', 'SYN']);
+    const dest = pick(this.botDests.length ? this.botDests : this.world.belts);
+    const g = Math.random() * Math.PI * 2;
+    const x = dest.x + Math.cos(g) * rand(500, 4000), y = dest.y + Math.sin(g) * rand(500, 4000);
+    const n = {
+      id: this.id('b'), npc: true, bot: true, type: shipType, name, tag, spec, x, y, vx: 0, vy: 0, a: g,
+      hull: spec.hull, shield: spec.shield, target: null, cds: [], dmgMul: ace ? 0.8 : 0.55, lastHitT: 0,
+      warp: 0, warpT: 0, keys: 0, aim: 0, sleep: false, orbitDir: Math.random() < 0.5 ? 1 : -1,
+      mode: 'patrol', patrolT: rand(20, 100), destX: dest.x, destY: dest.y, wanderX: x, wanderY: y, wanderT: 0,
+      sys: null, sec: 0, scanT: 0, sysT: 0, sayT: 0, botSlot: slot, ace,
+    };
+    this.updateNpcSys(n);
+    this.npcs.set(n.id, n);
+    return n;
+  }
+
+  botPickDest(n, flee) {
+    let cands = this.botDests.length ? this.botDests : this.world.belts;
+    cands = cands.filter((b) => b.sys !== n.sys && (!flee || Math.hypot(b.x - n.x, b.y - n.y) > 90000));
+    if (!cands.length) cands = this.world.belts;
+    const b = pick(cands);
+    n.destX = b.x + rand(-1500, 1500); n.destY = b.y + rand(-1500, 1500);
+    n.mode = flee ? 'flee' : 'travel';
+  }
+
+  botSay(n, kind) {
+    const t = now();
+    if (t < n.sayT) return;
+    n.sayT = t + 25;
+    const L = {
+      engage: ['네 화물은 이제 내 거다.', '로그오프할 시간이다, 초보.', '이 구역은 우리 영역이다!', '크레딧 두고 가면 살려주지.', '타겟 확인. 사냥 시작.', '보험은 들어뒀겠지?'],
+      flee: ['젠장, 후퇴한다!', '다음엔 안 봐준다...', '실드 붕괴! 이탈한다!'],
+      kill: ['GG. 다음 클론에서 보자.', '너무 쉽군.', '고철 잘 받아간다.'],
+    }[kind];
+    const out = { t: 'chat', ch: 'local', from: n.name, tag: n.tag, msg: pick(L), ts: Date.now(), where: n.sys ? this.sysById[n.sys].name : '딥 스페이스', bot: true };
+    for (const q of this.players.values()) if (Math.hypot(q.x - n.x, q.y - n.y) < 30000) this.send(q.conn, out);
+  }
+
+  // 플레이어가 근처에 없을 때: 물리 없이 목적지로 워프 이동만 추상 시뮬레이션
+  botSleepTravel(n, dt, t) {
+    n.shield = n.spec.shield;
+    n.hull = Math.min(n.spec.hull, n.hull + n.spec.hull * 0.02 * dt);
+    if (n.mode === 'patrol') {
+      n.vx = n.vy = 0; n.warp = WARP.NONE;
+      n.patrolT -= dt;
+      if (n.patrolT <= 0) this.botPickDest(n, false);
+      return;
+    }
+    const dx = n.destX - n.x, dy = n.destY - n.y, d = Math.hypot(dx, dy);
+    if (d < 3000) { n.mode = 'patrol'; n.patrolT = rand(40, 140); n.vx = n.vy = 0; n.warp = WARP.NONE; n.wanderX = n.x; n.wanderY = n.y; return; }
+    const v = n.spec.warpSpeed;
+    n.vx = (dx / d) * v; n.vy = (dy / d) * v; n.a = Math.atan2(dy, dx); n.warp = WARP.ACTIVE;
+    const step = Math.min(d, v * dt);
+    n.x += (dx / d) * step; n.y += (dy / d) * step;
+    n.sysT -= dt; if (n.sysT <= 0) { n.sysT = 1; this.updateNpcSys(n); }
   }
 
   spawnAnomaly() {
@@ -1114,7 +1232,7 @@ export class Game {
         const pr = {
           id: this.nid++, w: wKey, x: px, y: py,
           vx: Math.cos(ang) * w.speed + shooter.vx * 0.6, vy: Math.sin(ang) * w.speed + shooter.vy * 0.6,
-          life: w.life, dmg: w.dmg, owner: shooter.id, npc: !!shooter.npc, clan: shooter.npc ? null : shooter.acct.clan,
+          life: w.life, dmg: w.dmg * (shooter.dmgMul || 1), owner: shooter.id, npc: !!shooter.npc, fac: this.faction(shooter), clan: shooter.npc ? null : shooter.acct.clan,
           target: null, a: ang,
         };
         if (w.homing) pr.target = targetHint || this.findMissileTarget(shooter);
@@ -1134,8 +1252,8 @@ export class Game {
       if ((dx * c + dy * s) / Math.sqrt(d || 1) < 0.35) return;
       bd = d; best = e.id;
     };
-    for (const n of this.npcs.values()) consider(n);
-    for (const q of this.players.values()) if (q !== p && this.canDamage(p, q)) consider(q);
+    for (const n of this.npcs.values()) if (!n.sleep && this.hostileTo(p, n)) consider(n);
+    for (const q of this.players.values()) if (q !== p && this.hostileTo(p, q)) consider(q);
     return best;
   }
 
@@ -1150,6 +1268,19 @@ export class Game {
 
   entity(id) { return this.players.get(id) || this.npcs.get(id); }
 
+  faction(e) { return e.npc ? (e.spec.faction || 'pirate') : 'player'; }
+  // 적대 관계: 플레이어끼리는 PvP 규칙, 해적(봇 포함)은 모두를 공격, 보안군은 해적과 범죄자만 공격
+  hostileTo(att, tgt) {
+    if (!att || !tgt || tgt.dead || tgt.docked || att === tgt) return false;
+    const fa = this.faction(att), ft = this.faction(tgt);
+    if (fa === 'player' && ft === 'player') return this.canDamage(att, tgt);
+    if (fa === 'player') return ft !== 'police';
+    if (fa === 'pirate') return ft !== 'pirate';
+    if (ft === 'pirate') return true;
+    if (ft === 'player') return tgt.crimUntil > now();
+    return false;
+  }
+
   damage(tgt, amount, attId, wKey) {
     const att = this.entity(attId);
     if (att && !att.npc && !tgt.npc) {
@@ -1160,10 +1291,11 @@ export class Game {
         att.crimUntil = now() + 300;
       }
     }
+    if (att && (att.npc || tgt.npc) && !this.hostileTo(att, tgt)) return;
     tgt.lastHitT = now();
     tgt.lastHitBy = attId;
-    if (tgt.npc && att && !att.npc && !tgt.target) tgt.target = att.id;
-    if (!tgt.npc && tgt.warp === WARP.CHARGE) { tgt.warp = WARP.NONE; this.toast(tgt, '워프 방해! 충전이 취소되었습니다.', 'warn'); }
+    if (tgt.npc && att && (!tgt.target || !this.entity(tgt.target))) tgt.target = att.id;
+    if (tgt.warp === WARP.CHARGE) { tgt.warp = WARP.NONE; if (!tgt.npc) this.toast(tgt, '워프 방해! 충전이 취소되었습니다.', 'warn'); }
     let d = amount;
     if (tgt.shield > 0) { const s = Math.min(tgt.shield, d); tgt.shield -= s; d -= s; }
     tgt.hull -= d;
@@ -1176,6 +1308,7 @@ export class Game {
     if (tgt.npc) {
       this.npcs.delete(tgt.id);
       if (tgt.slot) { tgt.slot.npc = null; tgt.slot.respawnAt = now() + tgt.slot.delay * rand(0.8, 1.3); }
+      if (tgt.botSlot) { tgt.botSlot.npc = null; tgt.botSlot.respawnAt = now() + rand(90, 160); }
       for (const [item, ch, mn, mx] of tgt.spec.loot) if (Math.random() < ch) this.dropLoot(tgt.x, tgt.y, item, randi(mn, mx));
       if (att && !att.npc) {
         let bounty = tgt.spec.bounty;
@@ -1186,7 +1319,8 @@ export class Game {
           this.clans[sov.owner].bank += Math.round(bounty * 0.1);
           if (att.acct.clan === sov.owner) bounty = Math.round(bounty * 1.15);
         }
-        this.credit(att, bounty, `${tgt.spec.name} 격추`);
+        this.credit(att, bounty, `${tgt.bot ? tgt.name : tgt.spec.name} 격추`);
+        if (tgt.bot) this.sysChat(`⚔ ${att.acct.clan ? `[${att.acct.clan}] ` : ''}${att.name} 님이 로그 파일럿 [${tgt.tag}] ${tgt.name}의 ${tgt.spec.name}을(를) 격추했습니다! (+${bounty.toLocaleString()} ¢)`);
         att.acct.stats.pve++;
         this.progressMission(att, 'bounty', sysId);
         if (tgt.type === 'kaiju') this.sysChat(`☠ ${att.acct.clan ? `[${att.acct.clan}] ` : ''}${att.name} 님이 워로드 「카이주」를 격추했습니다! (+${bounty.toLocaleString()} ¢)`);
@@ -1221,7 +1355,12 @@ export class Game {
     a.active = shuttle.id;
     let killer = '알 수 없는 원인';
     if (att) {
-      if (att.npc) killer = att.spec.name;
+      if (att.bot) {
+        killer = `[${att.tag}] ${att.name} (로그 파일럿)`;
+        this.sysChat(`☠ 로그 파일럿 [${att.tag}] ${att.name} 이(가) ${a.clan ? `[${a.clan}] ` : ''}${tgt.name} 님의 ${shipSpec.name}을(를) 격추했습니다! (${tgt.sys ? this.sysById[tgt.sys].name : '딥 스페이스'})`);
+        this.botSay(att, 'kill');
+        att.target = null;
+      } else if (att.npc) killer = att.spec.name;
       else {
         killer = att.name;
         att.acct.stats.kills++;
@@ -1422,10 +1561,10 @@ export class Game {
       for (const [id, at] of this.astRespawn) if (at <= t) { this.astAmt[id] = this.world.asteroids[id].max; this.astRespawn.delete(id); }
       for (const slot of this.spawnSlots) {
         if (slot.npc || slot.respawnAt > t) continue;
-        const belt = this.beltById[slot.belt];
-        const g = Math.random() * Math.PI * 2, d = Math.random() * belt.r;
-        slot.npc = this.spawnNpc(slot.type, belt.x + Math.cos(g) * d, belt.y + Math.sin(g) * d, slot);
+        const pos = this.slotSpawnPos(slot);
+        slot.npc = this.spawnNpc(slot.type, pos.x, pos.y, slot);
       }
+      for (const slot of this.botSlots) if (!slot.npc && slot.respawnAt <= t) slot.npc = this.spawnBot(slot);
       this.tickSov();
     }
     if (t - this.lastMarket >= 20) {
@@ -1480,68 +1619,156 @@ export class Game {
   }
 
   tickNpcs(dt, t) {
-    const active = [...this.players.values()].filter((p) => !p.docked && !p.dead);
+    const active = [];
+    for (const p of this.players.values()) if (!p.docked && !p.dead) active.push(p);
+    const awake = [];
     for (const n of this.npcs.values()) {
       if (n.expires && n.expires < t) { this.npcs.delete(n.id); continue; }
-      // 근처에 플레이어가 없으면 휴면
+      // 근처에 플레이어가 없으면 휴면 (봇은 휴면 중에도 목적지로 이동)
       let near = false;
-      for (const p of active) if (Math.abs(p.x - n.x) < 16000 && Math.abs(p.y - n.y) < 16000) { near = true; break; }
+      for (const p of active) if (Math.abs(p.x - n.x) < 18000 && Math.abs(p.y - n.y) < 18000) { near = true; break; }
       n.sleep = !near;
-      if (n.sleep) continue;
-      const spec = n.spec;
-      if (t - n.lastHitT > 6) n.shield = Math.min(spec.shield, n.shield + spec.shield * 0.02 * dt);
+      if (n.sleep) { if (n.bot) this.botSleepTravel(n, dt, t); continue; }
+      awake.push(n);
+    }
+    for (const n of awake) {
+      if (!this.npcs.has(n.id)) continue;
+      if (n.bot) this.botAI(n, dt, t, active, awake); else this.npcAI(n, dt, t, active, awake);
+    }
+  }
 
-      // 타깃
-      let tgt = n.target ? this.players.get(n.target) : null;
-      if (tgt && (tgt.dead || tgt.docked || tgt.warp === WARP.ACTIVE || Math.hypot(tgt.x - n.x, tgt.y - n.y) > spec.aggro * 2.5)) { tgt = null; n.target = null; }
-      if (!tgt) {
-        let bd = spec.aggro * spec.aggro;
-        for (const p of active) {
-          if (p.warp === WARP.ACTIVE) continue;
-          const d = dist2(p.x, p.y, n.x, n.y);
-          if (d < bd) { bd = d; tgt = p; }
-        }
-        if (tgt) n.target = tgt.id;
+  validTarget(n, tgt) {
+    return !!tgt && (this.players.has(tgt.id) || this.npcs.has(tgt.id)) && !tgt.dead && !tgt.docked && tgt.warp !== WARP.ACTIVE
+      && this.hostileTo(n, tgt) && Math.hypot(tgt.x - n.x, tgt.y - n.y) < n.spec.aggro * 2.5;
+  }
+
+  findTarget(n, active, awake) {
+    let best = null, bd = n.spec.aggro * n.spec.aggro;
+    for (const p of active) {
+      if (p.warp === WARP.ACTIVE) continue;
+      if (n.bot && !pvpAllowed(p.sec)) continue;       // 봇은 하이섹에서 먼저 공격하지 않음
+      const d = dist2(p.x, p.y, n.x, n.y);
+      if (d < bd && this.hostileTo(n, p)) { bd = d; best = p; }
+    }
+    for (const e of awake) {
+      if (e === n || e.warp === WARP.ACTIVE) continue;
+      const d = dist2(e.x, e.y, n.x, n.y);
+      if (d < bd && this.hostileTo(n, e)) { bd = d; best = e; }
+    }
+    return best;
+  }
+
+  // 선회 공격 기동: 목표 주위를 돌며 리드 조준
+  combatSteer(n, tgt, dt, wKey) {
+    const spec = n.spec;
+    const dx = tgt.x - n.x, dy = tgt.y - n.y;
+    const d = Math.hypot(dx, dy);
+    const want = spec.range * 0.6;
+    const g = Math.atan2(-dy, -dx) + n.orbitDir * 0.9;
+    const gx = tgt.x + Math.cos(g) * want, gy = tgt.y + Math.sin(g) * want;
+    const w = WEAPONS[wKey];
+    const tt = d / w.speed;
+    const lx = tgt.x + tgt.vx * tt * 0.8, ly = tgt.y + tgt.vy * tt * 0.8;
+    const fireAim = Math.atan2(ly - n.y, lx - n.x);
+    const aim = d < spec.range * 1.3 ? fireAim : Math.atan2(gy - n.y, gx - n.x);
+    const keys = d > want ? K.UP : (K.UP | (n.orbitDir > 0 ? K.LEFT : K.RIGHT));
+    if (Math.random() < dt * 0.15) n.orbitDir *= -1;
+    return { keys, aim, d, canFire: d < spec.range && Math.abs(angDiff(fireAim, n.a)) < 0.35 };
+  }
+
+  npcAI(n, dt, t, active, awake) {
+    const spec = n.spec;
+    if (t - n.lastHitT > 6) n.shield = Math.min(spec.shield, n.shield + spec.shield * 0.02 * dt);
+    let tgt = n.target ? this.entity(n.target) : null;
+    if (!this.validTarget(n, tgt)) { tgt = null; n.target = null; }
+    n.scanT -= dt;
+    if (!tgt && n.scanT <= 0) { n.scanT = 0.5; tgt = this.findTarget(n, active, awake); if (tgt) n.target = tgt.id; }
+    const leash = spec.faction === 'police' ? 14000 : 9000;
+    if (Math.hypot(n.homeX - n.x, n.homeY - n.y) > leash && n.slot) { n.target = null; tgt = null; }
+
+    let keys, aim;
+    if (tgt) {
+      const c = this.combatSteer(n, tgt, dt, spec.weapon);
+      keys = c.keys; aim = c.aim;
+      n.cd -= dt;
+      if (c.canFire && n.cd <= 0) {
+        n.cd = WEAPONS[spec.weapon].cd * rand(1, 1.4);
+        this.fire(n, spec.weapon, [[spec.radius, 0]], tgt.id);
       }
-      const homeD = Math.hypot(n.homeX - n.x, n.homeY - n.y);
-      if (homeD > 9000 && n.slot) { n.target = null; tgt = null; }
+      if (spec.weapon2) {
+        n.cd2 -= dt;
+        if (c.d < spec.range && n.cd2 <= 0) { n.cd2 = WEAPONS[spec.weapon2].cd; this.fire(n, spec.weapon2, [[spec.radius * 0.6, -spec.radius * 0.5], [spec.radius * 0.6, spec.radius * 0.5]], tgt.id); }
+      }
+    } else {
+      n.wanderT -= dt;
+      const R = spec.faction === 'police' ? 6000 : 2500;
+      if (n.wanderT <= 0) { n.wanderT = rand(3, 8); const g = Math.random() * 6.28, r = rand(200, R); n.wanderX = n.homeX + Math.cos(g) * r; n.wanderY = n.homeY + Math.sin(g) * r; }
+      aim = Math.atan2(n.wanderY - n.y, n.wanderX - n.x);
+      keys = Math.hypot(n.wanderX - n.x, n.wanderY - n.y) > 200 ? K.UP : 0;
+    }
+    n.keys = keys;
+    stepShip(n, spec, keys, aim, dt, false);
+    const sp = Math.hypot(n.vx, n.vy);
+    const cap = tgt ? spec.maxSpeed : spec.maxSpeed * 0.45;
+    if (sp > cap) { n.vx *= cap / sp; n.vy *= cap / sp; }
+  }
 
-      let gx, gy, keys = K.UP, aim;
-      if (tgt) {
-        const dx = tgt.x - n.x, dy = tgt.y - n.y;
-        const d = Math.hypot(dx, dy);
-        // 선회 공격 궤도
-        const want = spec.range * 0.6;
-        const g = Math.atan2(-dy, -dx) + n.orbitDir * 0.9;
-        gx = tgt.x + Math.cos(g) * want; gy = tgt.y + Math.sin(g) * want;
-        // 조준 (리드)
-        const w = WEAPONS[spec.weapon];
-        const tt = d / w.speed;
-        const lx = tgt.x + tgt.vx * tt * 0.8, ly = tgt.y + tgt.vy * tt * 0.8;
-        const fireAim = Math.atan2(ly - n.y, lx - n.x);
-        const moveAim = Math.atan2(gy - n.y, gx - n.x);
-        aim = d < spec.range * 1.3 ? fireAim : moveAim;
-        keys = d > want ? K.UP : (K.UP | (n.orbitDir > 0 ? K.LEFT : K.RIGHT));
-        if (Math.random() < dt * 0.15) n.orbitDir *= -1;
-        n.cd -= dt;
-        if (d < spec.range && Math.abs(angDiff(fireAim, n.a)) < 0.35 && n.cd <= 0) {
-          n.cd = w.cd * rand(1, 1.4);
-          this.fire(n, spec.weapon, [[spec.radius, 0]], tgt.id);
-        }
-        if (spec.weapon2) {
-          n.cd2 -= dt;
-          const w2 = WEAPONS[spec.weapon2];
-          if (d < spec.range && n.cd2 <= 0) { n.cd2 = w2.cd; this.fire(n, spec.weapon2, [[spec.radius * 0.6, -spec.radius * 0.5], [spec.radius * 0.6, spec.radius * 0.5]], tgt.id); }
-        }
-      } else {
-        n.wanderT -= dt;
-        if (n.wanderT <= 0) { n.wanderT = rand(3, 8); const g = Math.random() * 6.28, r = rand(200, 2500); n.wanderX = n.homeX + Math.cos(g) * r; n.wanderY = n.homeY + Math.sin(g) * r; }
+  botAI(n, dt, t, active, awake) {
+    const spec = n.spec;
+    if (t - n.lastHitT > 5) n.shield = Math.min(spec.shield, n.shield + spec.shieldRegen * dt);
+    n.sysT -= dt; if (n.sysT <= 0) { n.sysT = 1; this.updateNpcSys(n); }
+    // 피해가 크면 도주
+    if (n.hull < spec.hull * 0.3 && n.mode !== 'flee') { n.mode = 'flee'; n.target = null; this.botPickDest(n, true); this.botSay(n, 'flee'); }
+
+    let tgt = null;
+    if (n.mode !== 'flee' && n.warp !== WARP.ACTIVE) {
+      tgt = n.target ? this.entity(n.target) : null;
+      if (!this.validTarget(n, tgt)) { tgt = null; n.target = null; }
+      n.scanT -= dt;
+      if (!tgt && n.scanT <= 0) {
+        n.scanT = 0.6;
+        tgt = this.findTarget(n, active, awake);
+        if (tgt) { n.target = tgt.id; if (!tgt.npc) this.botSay(n, 'engage'); }
+      }
+    }
+
+    let keys = 0, aim = n.a;
+    if (tgt) {
+      if (n.warp === WARP.CHARGE) n.warp = WARP.NONE;
+      const c = this.combatSteer(n, tgt, dt, spec.hardpoints[0][0]);
+      keys = c.keys; aim = c.aim;
+      if (c.canFire && n.warp === WARP.NONE) {
+        spec.hardpoints.forEach(([wKey, offs], i) => {
+          if ((n.cds[i] || 0) > t) return;
+          n.cds[i] = t + WEAPONS[wKey].cd * rand(1.15, 1.6);
+          this.fire(n, wKey, offs, tgt.id);
+        });
+      }
+    } else if (n.mode === 'patrol') {
+      n.patrolT -= dt;
+      n.wanderT -= dt;
+      if (n.wanderT <= 0) { n.wanderT = rand(4, 10); const g = Math.random() * 6.28, r = rand(300, 3500); n.wanderX = n.destX + Math.cos(g) * r; n.wanderY = n.destY + Math.sin(g) * r; }
+      if (n.warp === WARP.NONE) {
         aim = Math.atan2(n.wanderY - n.y, n.wanderX - n.x);
-        keys = Math.hypot(n.wanderX - n.x, n.wanderY - n.y) > 200 ? K.UP : 0;
+        keys = Math.hypot(n.wanderX - n.x, n.wanderY - n.y) > 250 ? K.UP : 0;
       }
-      stepShip(n, spec, keys, aim, dt, false);
-      const sp = Math.hypot(n.vx, n.vy);
-      const cap = tgt ? spec.maxSpeed : spec.maxSpeed * 0.4;
+      if (n.patrolT <= 0) this.botPickDest(n, false);
+    } else {
+      const nav = this.navigate(n, n.destX, n.destY, 1500);
+      keys = nav.keys; aim = nav.aim;
+      if (nav.arrived) { n.mode = 'patrol'; n.patrolT = rand(40, 140); n.wanderT = 0; }
+    }
+    // 워프 상태
+    if (n.warp === WARP.CHARGE) { n.warpT -= dt; if (n.warpT <= 0) { n.warp = WARP.ACTIVE; this.fx.push({ k: 'w', x: Math.round(n.x), y: Math.round(n.y), a: n.a }); } }
+    else if (n.warp === WARP.EXIT && Math.hypot(n.vx, n.vy) <= spec.maxSpeed * 1.05) n.warp = WARP.NONE;
+    if (n.warp === WARP.ACTIVE && n.sys) {
+      const s = this.sysById[n.sys];
+      if (Math.hypot(s.x - n.x, s.y - n.y) < s.starR * 2.2 && (s.x - n.x) * n.vx + (s.y - n.y) * n.vy > 0) n.warp = WARP.EXIT;
+    }
+    n.keys = keys;
+    stepShip(n, spec, keys, aim, dt, false);
+    if (n.warp === WARP.NONE && !tgt && n.mode === 'patrol') {
+      const sp = Math.hypot(n.vx, n.vy), cap = spec.maxSpeed * 0.5;
       if (sp > cap) { n.vx *= cap / sp; n.vy *= cap / sp; }
     }
   }
@@ -1574,9 +1801,12 @@ export class Game {
       const shooter = this.entity(pr.owner);
       for (const e of targets) {
         if (e.id === pr.owner) continue;
-        if (pr.npc && e.npc) continue;
-        if (!pr.npc && !e.npc) {
-          if (!shooter || !this.canDamage(shooter, e)) continue;
+        if (shooter) { if (!this.hostileTo(shooter, e)) continue; }
+        else {
+          // 발사자가 이미 사라진 경우 진영으로 판정
+          const ft = this.faction(e);
+          if (pr.fac === 'player' || ft === pr.fac) continue;
+          if (pr.fac === 'police' && ft === 'player' && !(e.crimUntil > now())) continue;
         }
         const r = e.spec.radius + w.size;
         if (Math.abs(e.x - pr.x) > r + 400 || Math.abs(e.y - pr.y) > r + 400) continue;
@@ -1614,9 +1844,9 @@ export class Game {
         const flags = (e.warp === WARP.ACTIVE ? 1 : 0) | (e.warp === WARP.CHARGE ? 2 : 0) | (e.boosting ? 4 : 0) | ((e.keys & K.UP) || (e.apKeys & K.UP) ? 8 : 0) | (!e.npc && e.crimUntil > t ? 16 : 0) | (e.npc && e.target === p.id ? 32 : 0);
         sh.push([
           e.id, Math.round(e.x), Math.round(e.y), Math.round(e.vx), Math.round(e.vy), r1(e.a * 10) / 10,
-          e.npc ? 'npc:' + e.type : e.type,
+          e.bot ? 'bot:' + e.type : e.npc ? 'npc:' + e.type : e.type,
           Math.round((e.hull / e.spec.hull) * 100), e.spec.shield ? Math.round((e.shield / e.spec.shield) * 100) : 0,
-          flags, e.npc ? '' : e.name, e.npc ? '' : (e.acct.clan || ''), e.npc ? -1 : e.mining,
+          flags, e.bot ? e.name : e.npc ? '' : e.name, e.bot ? e.tag : e.npc ? '' : (e.acct.clan || ''), e.npc ? -1 : e.mining,
         ]);
       }
       const ms = [];

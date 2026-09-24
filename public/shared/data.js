@@ -27,6 +27,8 @@ export const WEAPONS = {
   npc_pulse:   { name: '해적 레이저', dmg: 6,  cd: 0.45, speed: 1200, life: 0.9, energy: 0, color: '#ff3355', size: 3, spread: 0.08 },
   npc_blaster: { name: '해적 블래스터', dmg: 13, cd: 0.50, speed: 1200, life: 1.0, energy: 0, color: '#ff3355', size: 4, spread: 0.06 },
   npc_rail:    { name: '신디케이트 레일', dmg: 38, cd: 1.6, speed: 2600, life: 0.9, energy: 0, color: '#ff5a1f', size: 5, spread: 0.03 },
+  npc_scatter: { name: '해적 스캐터', dmg: 5, cd: 0.9, speed: 1250, life: 0.6, energy: 0, color: '#ff3355', size: 3, spread: 0.2, count: 4 },
+  police_blaster: { name: '보안군 블래스터', dmg: 14, cd: 0.4, speed: 1500, life: 0.9, energy: 0, color: '#3bb0ff', size: 4, spread: 0.04 },
   npc_missile: { name: '카이주 미사일', dmg: 45, cd: 2.2, speed: 600, life: 5, energy: 0, color: '#ff5a1f', size: 6, spread: 0.4, homing: 2.6 },
 };
 
@@ -132,6 +134,9 @@ export const NPCS = {
   raider:   { name: '넷러너 레이더', hull: 200, shield: 90, accel: 380, maxSpeed: 470, turn: 3.0, radius: 17, weapon: 'npc_blaster', bounty: 700, aggro: 2000, range: 900, color: '#ff2255', shape: 'raider', loot: [['scrap', 0.8, 2, 6], ['datashard', 0.25, 1, 2], ['plasma', 0.3, 1, 4]] },
   enforcer: { name: '신디케이트 집행자', hull: 600, shield: 320, accel: 300, maxSpeed: 420, turn: 2.4, radius: 26, weapon: 'npc_rail', bounty: 2600, aggro: 2400, range: 1500, color: '#ff5a1f', shape: 'enforcer', loot: [['datashard', 0.7, 1, 4], ['cyberware', 0.3, 1, 2], ['contraband', 0.15, 1, 2]] },
   kaiju:    { name: '워로드 「카이주」', hull: 4200, shield: 2200, accel: 200, maxSpeed: 320, turn: 1.4, radius: 60, weapon: 'npc_missile', weapon2: 'npc_blaster', bounty: 30000, aggro: 3000, range: 1800, color: '#ff0033', shape: 'boss', loot: [['quantum', 1, 4, 10], ['contraband', 0.8, 2, 6], ['datashard', 1, 4, 10]] },
+  swarm:    { name: '스웜 드론', hull: 35, shield: 0, accel: 520, maxSpeed: 560, turn: 4.2, radius: 9, weapon: 'npc_pulse', bounty: 90, aggro: 1900, range: 700, color: '#ff5577', shape: 'drone', loot: [['scrap', 0.4, 1, 2]] },
+  gunship:  { name: '블랙아이스 건쉽', hull: 420, shield: 220, accel: 280, maxSpeed: 400, turn: 2.2, radius: 24, weapon: 'npc_scatter', weapon2: 'npc_blaster', bounty: 1600, aggro: 2200, range: 750, color: '#ff4422', shape: 'frigate', loot: [['plasma', 0.6, 2, 6], ['cyberware', 0.2, 1, 2], ['datashard', 0.3, 1, 2]] },
+  police:   { name: '보안군 인터셉터', faction: 'police', hull: 480, shield: 360, accel: 440, maxSpeed: 620, turn: 3.6, radius: 18, weapon: 'police_blaster', bounty: 0, aggro: 2600, range: 1000, color: '#3bb0ff', shape: 'fighter', loot: [] },
   guardian: { name: '고대 수호자', hull: 350, shield: 350, accel: 340, maxSpeed: 450, turn: 2.8, radius: 20, weapon: 'npc_blaster', bounty: 1200, aggro: 2500, range: 1000, color: '#c070ff', shape: 'guardian', loot: [['datashard', 0.6, 1, 3], ['quantum', 0.2, 1, 2]] },
 };
 

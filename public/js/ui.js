@@ -2,7 +2,7 @@
 import { G, send, serverTime, saveSettings } from './state.js';
 import { SHIPS, SHIP_ORDER, ITEMS, MARKET_ITEMS, WEAPONS, NPCS, secLabel, secColor, fmtCredits, fmtDist, DOCK_RANGE, INTERACT_RANGE, CLAN_CREATE_COST, STATION_TYPES } from '../shared/data.js';
 import { bodyPos } from '../shared/physics.js';
-import { resize, hexA, shipPreview } from './render.js';
+import { resize, hexA, shipPreview, shipInfo, shipLabel } from './render.js';
 import { sfx, audioSettings, setVolume, initAudio } from './audio.js';
 import { openMap } from './map.js';
 
@@ -15,6 +15,7 @@ let loginCb = null;
 let stTab = 'market', menuTab = 'pilot', chatTab = 'global';
 const chatMsgs = [];
 let ovFilter = 0;
+let ovHover = false;
 const OV_FILTERS = ['전체', '함선', '천체', '신호'];
 
 // ============================================================
@@ -58,10 +59,20 @@ export function initUI() {
   document.querySelector('.hotkeys').addEventListener('click', (e) => {
     const hk = e.target.closest('.hk'); if (!hk) return;
     const a = hk.dataset.act;
-    if (a === 'map') openMap(); else if (a === 'menu') openMenu(); else send({ t: 'act', a });
+    if (a === 'map') openMap(); else if (a === 'menu') openMenu(); else if (a === 'home') send({ t: 'ap', nearest: true }); else send({ t: 'act', a });
   });
   $('ov-filter').addEventListener('click', () => { ovFilter = (ovFilter + 1) % OV_FILTERS.length; $('ov-filter').textContent = OV_FILTERS[ovFilter]; });
-  $('ov-list').addEventListener('click', (e) => { const r = e.target.closest('.ov-row'); if (r && r.dataset.kind) { send({ t: 'ap', kind: r.dataset.kind, id: r.dataset.id }); sfx.click(); } });
+  // 목록은 주기적으로 다시 그려지므로 click 대신 pointerdown으로 즉시 처리
+  $('ov-list').addEventListener('pointerdown', (e) => {
+    const r = e.target.closest('.ov-row');
+    if (!r || !r.dataset.kind) return;
+    e.preventDefault();
+    send({ t: 'ap', kind: r.dataset.kind, id: r.dataset.id });
+    r.classList.add('picked');
+    sfx.click();
+  });
+  $('overview').addEventListener('pointerenter', () => { ovHover = true; });
+  $('overview').addEventListener('pointerleave', () => { ovHover = false; });
   $('ap-info').addEventListener('click', () => { send({ t: 'ap', clear: true }); toast('오토파일럿 해제', 'info'); });
 
   // 위임된 버튼 액션
@@ -160,7 +171,7 @@ function chatHtml(m) {
   if (m.ch === 'sys') return `<div class="m ch-sys"><span class="ts">${ts}</span>${esc(m.msg)}</div>`;
   const tag = m.tag ? `<span class="clan-tag">[${esc(m.tag)}]</span>` : '';
   const pre = m.ch === 'whisper' ? (m.from === G.name ? `→ ${esc(m.to)}` : `← `) : m.ch === 'local' ? `<span class="dim">[${esc(m.where || '지역')}]</span> ` : m.ch === 'clan' ? '<span class="dim">[클랜]</span> ' : '';
-  return `<div class="m ch-${m.ch}"><span class="ts">${ts}</span>${pre}${tag}<span class="from" data-n="${esc(m.from)}">${esc(m.from)}</span>: ${esc(m.msg)}</div>`;
+  return `<div class="m ch-${m.ch}${m.bot ? ' bot' : ''}"><span class="ts">${ts}</span>${pre}${tag}<span class="from" data-n="${m.bot ? '' : esc(m.from)}">${esc(m.from)}</span>: ${esc(m.msg)}</div>`;
 }
 function appendChat(m) {
   const log = $('chat-log');
@@ -217,7 +228,7 @@ export function frame(dt, t) {
   hudT += dt; radarT += dt; ovT += dt;
   if (hudT > 0.1) { hudT = 0; updateHud(); }
   if (radarT > 0.08) { radarT = 0; drawRadar(); }
-  if (ovT > 0.4) { ovT = 0; updateOverview(); }
+  if (ovT > (ovHover ? 1.5 : 0.4)) { ovT = 0; updateOverview(); }
 }
 
 function setBar(sel, v, max) {
@@ -335,9 +346,11 @@ function drawRadar() {
   for (const l of G.loots.values()) { const [x, y] = P(l.x, l.y); c.fillStyle = '#ffe600'; c.fillRect(x - 1.5, y - 1.5, 3, 3); }
   for (const e of G.ships.values()) {
     const [x, y] = P(e.dx, e.dy);
-    const npc = e.type.startsWith('npc:');
-    c.fillStyle = npc ? '#ff2255' : (e.flags & 16) ? '#ff7700' : (G.acct?.clan && e.tag === G.acct.clan) ? '#2cff9a' : '#00f0ff';
-    c.beginPath(); c.arc(x, y, npc && e.type === 'npc:kaiju' ? 5 : 3, 0, Math.PI * 2); c.fill();
+    const info = shipInfo(e.type);
+    c.fillStyle = info.police ? '#3bb0ff' : info.bot ? '#ff4466' : info.npc ? '#ff2255' : (e.flags & 16) ? '#ff7700' : (G.acct?.clan && e.tag === G.acct.clan) ? '#2cff9a' : '#00f0ff';
+    const big = e.type === 'npc:kaiju' || info.bot;
+    if (info.bot) { c.save(); c.translate(x, y); c.rotate(Math.PI / 4); c.fillRect(-3.5, -3.5, 7, 7); c.restore(); }
+    else { c.beginPath(); c.arc(x, y, big ? 5 : 3, 0, Math.PI * 2); c.fill(); }
   }
   if (me.ap) {
     let x = me.ap.x, y = me.ap.y;
@@ -374,12 +387,13 @@ function updateOverview() {
   }
   if (f === 0 || f === 3) for (const an of G.anomalies.values()) rows.push({ cls: 'anomaly', name: `✦ ${an.name}`, d: Math.hypot(an.x - X, an.y - Y), kind: 'anomaly', id: an.id });
   if (f === 0 || f === 1) for (const e of G.ships.values()) {
-    const npc = e.type.startsWith('npc:');
-    const nm = npc ? NPCS[e.type.slice(4)].name : `${e.tag ? `[${e.tag}] ` : ''}${e.name} (${SHIPS[e.type].cls})`;
-    rows.push({ cls: npc || (e.flags & 16) ? 'hostile' : 'player', name: nm, d: Math.hypot(e.dx - X, e.dy - Y) });
+    const info = shipInfo(e.type);
+    const nm = shipLabel(e, info) + (info.npc && !info.bot ? '' : ` (${info.spec.cls})`);
+    rows.push({ cls: info.police ? 'police' : info.hostile || (e.flags & 16) ? 'hostile' : 'player', name: nm, d: Math.hypot(e.dx - X, e.dy - Y) });
   }
   rows.sort((a, b) => a.d - b.d);
-  $('ov-list').innerHTML = rows.slice(0, 16).map((r) => `<div class="ov-row ${r.cls}" ${r.kind ? `data-kind="${r.kind}" data-id="${esc(r.id)}" title="클릭: 오토파일럿"` : ''}><span class="nm">${esc(r.name)}</span><span class="d">${fmtDist(r.d)}</span></div>`).join('') || '<div class="dim" style="font-size:12px">주변에 아무것도 없습니다</div>';
+  const apId = me.ap && me.ap.id;
+  $('ov-list').innerHTML = rows.slice(0, 16).map((r) => `<div class="ov-row ${r.cls}${r.id && r.id === apId ? ' picked' : ''}" ${r.kind ? `data-kind="${r.kind}" data-id="${esc(r.id)}" title="클릭: 오토파일럿"` : ''}><span class="nm">${esc(r.name)}</span><span class="d">${fmtDist(r.d)}</span></div>`).join('') || '<div class="dim" style="font-size:12px">주변에 아무것도 없습니다</div>';
 }
 
 // ============================================================
@@ -646,7 +660,7 @@ function bindSettings() {
 
 function helpHtml() {
   return `<div class="help-grid">
-    <div><h4>조작</h4><kbd>W A S D</kbd> 추진/측면 이동<br><kbd>마우스</kbd> 조준 (함선이 커서를 향함)<br><kbd>우클릭 드래그</kbd> 3D 카메라 회전 · <kbd>C</kbd> 카메라 초기화<br><kbd>좌클릭</kbd>/<kbd>Space</kbd> 사격<br><kbd>Shift</kbd> 부스터 (에너지 소모)<br><kbd>J</kbd> 워프 드라이브 켜기/끄기<br><kbd>F</kbd> 채굴 레이저<br><kbd>R</kbd> 신호 스캐너<br><kbd>E</kbd> 도킹 / 해킹<br><kbd>M</kbd> 은하 지도 · <kbd>X</kbd> 오토파일럿 해제<br><kbd>휠</kbd> 확대/축소 · <kbd>Tab</kbd> 메뉴 · <kbd>Enter</kbd> 채팅</div>
+    <div><h4>조작</h4><kbd>W A S D</kbd> 추진/측면 이동<br><kbd>마우스</kbd> 조준 (함선이 커서를 향함)<br><kbd>우클릭 드래그</kbd> 3D 카메라 회전 · <kbd>C</kbd> 카메라 초기화<br><kbd>좌클릭</kbd>/<kbd>Space</kbd> 사격<br><kbd>Shift</kbd> 부스터 (에너지 소모)<br><kbd>J</kbd> 워프 드라이브 켜기/끄기<br><kbd>F</kbd> 채굴 레이저<br><kbd>R</kbd> 신호 스캐너<br><kbd>E</kbd> 도킹 / 해킹<br><kbd>M</kbd> 은하 지도 · <kbd>G</kbd> 가장 가까운 스테이션으로 자동 귀환 · <kbd>X</kbd> 오토파일럿 해제<br><kbd>휠</kbd> 확대/축소 · <kbd>Tab</kbd> 메뉴 · <kbd>Enter</kbd> 채팅</div>
     <div><h4>이동과 워프</h4>행성 사이는 순간이동 없이 직접 비행합니다. <b>J</b>를 누르면 워프 드라이브가 충전된 뒤 초고속으로 비행합니다. 워프 중에는 선회가 느리고 사격할 수 없으며, 항성 근처에서는 강제로 워프가 해제됩니다. 충전 중 피격되면 워프가 취소됩니다!<br><br><b>M</b> 은하 지도에서 목적지를 더블클릭하면 오토파일럿이 자동으로 워프해 이동하고, 스테이션이라면 자동 도킹합니다.</div>
     <div><h4>돈 버는 법</h4>⛏ <b>채굴</b>: 소행성대에서 F로 광석 채굴 → 스테이션 시장에 판매<br>⇄ <b>무역</b>: ▼생산 스테이션에서 사서 ▲수요 스테이션에 판매<br>📦 <b>임무</b>: 배송 · 현상금 · 조달 · 탐사 계약<br>☠ <b>사냥</b>: 해적 격추 현상금 + 전리품<br>✦ <b>탐험</b>: R로 이상 신호 스캔 → 찾아가서 E로 해킹 → 크레딧 + 희귀품<br>★ <b>발견</b>: 처음 방문하는 성계마다 보너스</div>
     <div><h4>보안 등급</h4><span style="color:#2cff9a">하이섹 (0.5 이상)</span>: PvP 불가, 안전하지만 수익이 낮음<br><span style="color:#ff8a00">로우섹 (0.1~0.4)</span>: PvP 가능. 무고한 파일럿을 먼저 공격하면 5분간 범죄자(☠) 지정 — 누구나 공격 가능하고 현상금이 걸림<br><span style="color:#ff1f4b">널섹 (0.0 이하)</span>: 무법지대. 최고급 광석, 강력한 해적, 워로드 보스, 클랜 주권 비콘<br><br>파괴되면 화물을 잃고 함선도 잃습니다(셔틀 제외). <b>보험</b>을 꼭 드세요!</div>

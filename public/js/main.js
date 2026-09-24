@@ -260,6 +260,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyR': send({ t: 'act', a: 'scan' }); break;
     case 'KeyE': send({ t: 'act', a: 'interact' }); break;
     case 'KeyX': send({ t: 'ap', clear: true }); UI.toast('오토파일럿 해제', 'info'); break;
+    case 'KeyG': send({ t: 'ap', nearest: true }); break;
     case 'KeyC': G.cam.yaw = Math.PI / 2; G.cam.pitch = 0.62; break;
     case 'Equal': case 'NumpadAdd': zoomBy(1.2); break;
     case 'Minus': case 'NumpadSubtract': zoomBy(1 / 1.2); break;

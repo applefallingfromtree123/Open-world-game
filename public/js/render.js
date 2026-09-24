@@ -672,9 +672,20 @@ function edgeMarker(x, y, color, text, t) {
   if (text) label(text, px - Math.cos(a) * 40, py - Math.sin(a) * 24, color, 11, true);
 }
 
-function shipInfo(type) {
-  if (type.startsWith('npc:')) { const n = NPCS[type.slice(4)]; return { spec: n, shape: n.shape, color: n.color, npc: true }; }
+// 개체 종류 판별: 'npc:타입' (해적/보안군), 'bot:기종' (로그 파일럿 봇), 그 외 플레이어 기종
+export function shipInfo(type) {
+  if (type.startsWith('npc:')) {
+    const n = NPCS[type.slice(4)];
+    const police = n.faction === 'police';
+    return { spec: n, shape: n.shape, color: n.color, npc: true, hostile: !police, police };
+  }
+  if (type.startsWith('bot:')) { const s = SHIPS[type.slice(4)]; return { spec: s, shape: s.shape, color: '#ff4466', npc: true, bot: true, hostile: true }; }
   const s = SHIPS[type]; return { spec: s, shape: s.shape, color: s.color, npc: false };
+}
+export function shipLabel(e, info) {
+  if (info.bot) return `☠ [${e.tag}] ${e.name}`;
+  if (info.npc) return info.spec.name;
+  return `${e.tag ? `[${e.tag}] ` : ''}${e.name}`;
 }
 
 // ------------------------------------------------------------
@@ -802,8 +813,10 @@ function updateDynamic(T, t, dt) {
     if (G.settings.names) {
       const p = proj(e.dx, e.dy, info.spec.radius * 2.2 + 20);
       if (p) {
-        const nm = info.npc ? info.spec.name : `${e.tag ? `[${e.tag}] ` : ''}${e.name}`;
-        label(nm + ((e.flags & 16) ? ' ☠' : ''), p.x, p.y - 12, info.npc ? '#ff5577' : color, 12, !info.npc);
+        const nm = shipLabel(e, info);
+        const lc = info.police ? '#6ac8ff' : info.bot ? '#ff4466' : info.npc ? '#ff5577' : color;
+        label(nm + ((e.flags & 16) ? ' ☠' : ''), p.x, p.y - 12, lc, 12, !info.npc || info.bot);
+        if (info.bot) label(info.spec.cls, p.x, p.y + 10, 'rgba(255,120,140,0.7)', 10);
         const bw = 46;
         octx.fillStyle = 'rgba(0,0,0,0.6)'; octx.fillRect(p.x - bw / 2, p.y - 6, bw, 6);
         if (info.spec.shield) { octx.fillStyle = '#00f0ff'; octx.fillRect(p.x - bw / 2, p.y - 6, bw * e.sh / 100, 2); }
