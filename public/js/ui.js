@@ -36,8 +36,11 @@ export function initUI() {
   $('btn-menu-close').addEventListener('click', closeMenu);
 
   // 채팅
+  $('chat-toggle').addEventListener('click', (e) => { e.stopPropagation(); toggleChat(); });
+  setChatCollapsed(chatCollapsed);
   document.querySelector('.chat-tabs').addEventListener('click', (e) => {
-    const b = e.target.closest('button'); if (!b) return;
+    const b = e.target.closest('button[data-ch]'); if (!b) return;
+    if (chatCollapsed) setChatCollapsed(false);
     chatTab = b.dataset.ch; b.classList.remove('unread');
     document.querySelectorAll('.chat-tabs button').forEach((x) => x.classList.toggle('active', x === b));
     renderChat();
@@ -53,6 +56,8 @@ export function initUI() {
     }
     e.stopPropagation();
   });
+  // Enter로 잠깐 펼쳤던 경우 입력을 마치면 다시 접기
+  input.addEventListener('blur', () => { if (chatTempOpen) { chatTempOpen = false; setChatCollapsed(true); } });
   $('chat-log').addEventListener('click', (e) => { const f = e.target.closest('.from'); if (f && f.dataset.n && f.dataset.n !== G.name) { input.value = `/w ${f.dataset.n} `; input.focus(); } });
 
   // 핫키 버튼
@@ -150,7 +155,37 @@ export function hideDeath() { $('death').classList.add('hidden'); }
 // ============================================================
 //  채팅
 // ============================================================
+// ---------- 채팅창 접기 ----------
+let chatCollapsed = false, chatTempOpen = false, chatUnread = 0, peekTimer = null;
+try { chatCollapsed = localStorage.getItem('nv_chat_collapsed') === '1'; } catch {}
+function setChatCollapsed(v) {
+  chatCollapsed = v;
+  $('chat').classList.toggle('collapsed', v);
+  $('chat-toggle').textContent = v ? '▴' : '▾';
+  $('chat-toggle').title = v ? '채팅창 펼치기 (V)' : '채팅창 접기 (V)';
+  if (!v) { chatUnread = 0; renderChat(); }
+  updateUnread();
+  if (!chatTempOpen) try { localStorage.setItem('nv_chat_collapsed', v ? '1' : '0'); } catch {}
+}
+export function toggleChat() { chatTempOpen = false; setChatCollapsed(!chatCollapsed); sfx.click(); }
+function updateUnread() {
+  const el = $('chat-unread');
+  el.textContent = chatUnread > 99 ? '99+' : chatUnread;
+  el.classList.toggle('hidden', !(chatCollapsed && chatUnread > 0));
+}
+function peek(m) {
+  const el = $('chat-peek');
+  el.textContent = m.ch === 'sys' ? m.msg : `${m.tag ? `[${m.tag}] ` : ''}${m.from}: ${m.msg}`;
+  el.classList.add('show');
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => el.classList.remove('show'), 5000);
+}
+
 export function addChat(m) {
+  if (chatCollapsed) {
+    if (m.ch !== 'sys' && m.from !== G.name) { chatUnread++; updateUnread(); }
+    if (m.ch !== 'sys' || /⚔|☠|⚑/.test(m.msg)) peek(m);
+  }
   chatMsgs.push(m);
   if (chatMsgs.length > 200) chatMsgs.shift();
   const vis = chatVisible(m, chatTab);
@@ -185,7 +220,10 @@ function renderChat() {
   log.innerHTML = chatMsgs.filter((m) => chatVisible(m, chatTab)).slice(-150).map(chatHtml).join('');
   log.scrollTop = log.scrollHeight;
 }
-export function focusChat() { $('chat-input').focus(); }
+export function focusChat() {
+  if (chatCollapsed) { chatTempOpen = true; $('chat').classList.remove('collapsed'); chatUnread = 0; updateUnread(); renderChat(); }
+  $('chat-input').focus();
+}
 
 // ============================================================
 //  계정 / 정보
@@ -660,7 +698,7 @@ function bindSettings() {
 
 function helpHtml() {
   return `<div class="help-grid">
-    <div><h4>조작</h4><kbd>W A S D</kbd> 추진/측면 이동<br><kbd>마우스</kbd> 조준 (함선이 커서를 향함)<br><kbd>우클릭 드래그</kbd> 3D 카메라 회전 · <kbd>C</kbd> 카메라 초기화<br><kbd>좌클릭</kbd>/<kbd>Space</kbd> 사격<br><kbd>Shift</kbd> 부스터 (에너지 소모)<br><kbd>J</kbd> 워프 드라이브 켜기/끄기<br><kbd>F</kbd> 채굴 레이저<br><kbd>R</kbd> 신호 스캐너<br><kbd>E</kbd> 도킹 / 해킹<br><kbd>M</kbd> 은하 지도 · <kbd>G</kbd> 가장 가까운 스테이션으로 자동 귀환 · <kbd>X</kbd> 오토파일럿 해제<br><kbd>휠</kbd> 확대/축소 · <kbd>Tab</kbd> 메뉴 · <kbd>Enter</kbd> 채팅</div>
+    <div><h4>조작</h4><kbd>W A S D</kbd> 추진/측면 이동<br><kbd>마우스</kbd> 조준 (함선이 커서를 향함)<br><kbd>우클릭 드래그</kbd> 3D 카메라 회전 · <kbd>C</kbd> 카메라 초기화<br><kbd>좌클릭</kbd>/<kbd>Space</kbd> 사격<br><kbd>Shift</kbd> 부스터 (에너지 소모)<br><kbd>J</kbd> 워프 드라이브 켜기/끄기<br><kbd>F</kbd> 채굴 레이저<br><kbd>R</kbd> 신호 스캐너<br><kbd>E</kbd> 도킹 / 해킹<br><kbd>M</kbd> 은하 지도 · <kbd>G</kbd> 가장 가까운 스테이션으로 자동 귀환 · <kbd>X</kbd> 오토파일럿 해제<br><kbd>휠</kbd> 확대/축소 · <kbd>Tab</kbd> 메뉴 · <kbd>Enter</kbd> 채팅 · <kbd>V</kbd> 채팅창 접기/펼치기</div>
     <div><h4>이동과 워프</h4>행성 사이는 순간이동 없이 직접 비행합니다. <b>J</b>를 누르면 워프 드라이브가 충전된 뒤 초고속으로 비행합니다. 워프 중에는 선회가 느리고 사격할 수 없으며, 항성 근처에서는 강제로 워프가 해제됩니다. 충전 중 피격되면 워프가 취소됩니다!<br><br><b>M</b> 은하 지도에서 목적지를 더블클릭하면 오토파일럿이 자동으로 워프해 이동하고, 스테이션이라면 자동 도킹합니다.</div>
     <div><h4>돈 버는 법</h4>⛏ <b>채굴</b>: 소행성대에서 F로 광석 채굴 → 스테이션 시장에 판매<br>⇄ <b>무역</b>: ▼생산 스테이션에서 사서 ▲수요 스테이션에 판매<br>📦 <b>임무</b>: 배송 · 현상금 · 조달 · 탐사 계약<br>☠ <b>사냥</b>: 해적 격추 현상금 + 전리품<br>✦ <b>탐험</b>: R로 이상 신호 스캔 → 찾아가서 E로 해킹 → 크레딧 + 희귀품<br>★ <b>발견</b>: 처음 방문하는 성계마다 보너스</div>
     <div><h4>보안 등급</h4><span style="color:#2cff9a">하이섹 (0.5 이상)</span>: PvP 불가, 안전하지만 수익이 낮음<br><span style="color:#ff8a00">로우섹 (0.1~0.4)</span>: PvP 가능. 무고한 파일럿을 먼저 공격하면 5분간 범죄자(☠) 지정 — 누구나 공격 가능하고 현상금이 걸림<br><span style="color:#ff1f4b">널섹 (0.0 이하)</span>: 무법지대. 최고급 광석, 강력한 해적, 워로드 보스, 클랜 주권 비콘<br><br>파괴되면 화물을 잃고 함선도 잃습니다(셔틀 제외). <b>보험</b>을 꼭 드세요!</div>
