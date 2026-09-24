@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>NEON//VOID — 사이버펑크 우주 MMO</title>
+  <meta name="description" content="브라우저에서 즐기는 사이버펑크 오픈월드 우주 MMO. 채굴, 무역, 해적 사냥, 탐험, 클랜 전쟁.">
+  <meta name="theme-color" content="#05010f">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 L28 28 L16 22 L4 28Z' fill='%2300f0ff'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="vignette"></div>
+  <div id="scanlines"></div>
+
+  <!-- ================= 로그인 ================= -->
+  <div id="login-screen">
+    <canvas id="title-bg"></canvas>
+    <div class="login-wrap">
+      <div class="logo glitch" data-text="NEON//VOID">NEON//VOID</div>
+      <div class="tagline">사이버펑크 오픈월드 우주 MMO <span class="blink">_</span></div>
+      <form id="login-form" autocomplete="on">
+        <label>파일럿 콜사인<input id="login-name" name="username" maxlength="16" autocomplete="username" placeholder="예: 네온고스트" required></label>
+        <label>접속 코드 (비밀번호)<input id="login-pass" name="password" type="password" maxlength="64" autocomplete="current-password" placeholder="4자 이상" required></label>
+        <div class="login-btns">
+          <button type="submit" id="btn-login" class="btn primary">▶ 접속</button>
+          <button type="button" id="btn-register" class="btn">＋ 신규 파일럿 등록</button>
+        </div>
+        <div id="login-msg"></div>
+      </form>
+      <div id="server-status"><span class="dot"></span> <span id="server-status-text">서버 연결 중...</span></div>
+      <div class="login-features">
+        <div><b>⛏ 채굴</b>소행성을 부숴 광석을 캔다</div>
+        <div><b>⇄ 무역</b>스테이션 간 시세 차익</div>
+        <div><b>☠ 전투</b>해적 · PvP · 워로드 보스</div>
+        <div><b>✦ 탐험</b>이상 신호 스캔과 해킹</div>
+        <div><b>⚑ 클랜</b>널섹 주권 비콘 점령</div>
+        <div><b>🚀 10종 함선</b>셔틀부터 순양함까지</div>
+      </div>
+    </div>
+    <div class="login-foot">WASD 이동 · 마우스 조준 · 클릭 사격 · J 워프 · M 은하지도 · H 도움말</div>
+  </div>
+
+  <!-- ================= HUD ================= -->
+  <div id="hud" class="hidden">
+    <div id="hud-tl" class="panel">
+      <div class="pilot-row"><span id="hud-tag" class="clan-tag"></span><span id="hud-name"></span></div>
+      <div id="hud-credits" class="credits">0 ¢</div>
+      <div id="hud-ship" class="sub"></div>
+      <div id="hud-cargo" class="sub"></div>
+      <div id="hud-crim" class="crim hidden"></div>
+    </div>
+    <div id="hud-missions"></div>
+
+    <div id="hud-top">
+      <div id="loc-name">—</div>
+      <div id="loc-sec"></div>
+      <div id="ap-info" class="hidden"></div>
+    </div>
+
+    <div id="hud-tr">
+      <div class="panel radar-wrap"><canvas id="radar" width="200" height="200"></canvas><div class="radar-label">레이더 · <span id="radar-range">8km</span></div></div>
+      <div id="overview" class="panel">
+        <div class="ov-head">오버뷰 <span class="ov-filter" id="ov-filter">전체</span></div>
+        <div id="ov-list"></div>
+      </div>
+    </div>
+
+    <div id="hud-bottom">
+      <div id="warp-status" class="hidden"></div>
+      <div id="hack-bar" class="hidden"><div class="fill"></div><span>해킹 중...</span></div>
+      <div class="bars panel">
+        <div class="bar shield"><i></i><span>실드</span><b id="v-shield"></b></div>
+        <div class="bar hull"><i></i><span>선체</span><b id="v-hull"></b></div>
+        <div class="bar energy"><i></i><span>에너지</span><b id="v-energy"></b></div>
+        <div class="speed"><b id="v-speed">0</b><span>m/s</span></div>
+      </div>
+      <div class="hotkeys">
+        <div class="hk" data-act="warp"><kbd>J</kbd>워프</div>
+        <div class="hk" data-act="mine"><kbd>F</kbd>채굴</div>
+        <div class="hk" data-act="scan"><kbd>R</kbd>스캔<em id="scan-cd"></em></div>
+        <div class="hk" data-act="interact"><kbd>E</kbd>도킹/해킹</div>
+        <div class="hk" data-act="map"><kbd>M</kbd>지도</div>
+        <div class="hk" data-act="menu"><kbd>Tab</kbd>메뉴</div>
+      </div>
+    </div>
+
+    <div id="chat" class="panel">
+      <div class="chat-tabs">
+        <button data-ch="global" class="active">전체</button>
+        <button data-ch="local">지역</button>
+        <button data-ch="clan">클랜</button>
+        <span id="online-count"></span>
+      </div>
+      <div id="chat-log"></div>
+      <input id="chat-input" maxlength="200" placeholder="Enter 키로 채팅 · /w 이름 귓속말">
+    </div>
+
+    <div id="toasts"></div>
+    <div id="banner"></div>
+    <div id="interact-hint" class="hidden"></div>
+  </div>
+
+  <!-- ================= 창들 ================= -->
+  <div id="station" class="window hidden">
+    <div class="win-head">
+      <div><div class="win-title" id="st-name"></div><div class="win-sub" id="st-sub"></div></div>
+      <div class="flex"><button class="btn" id="btn-st-menu">☰ 메뉴</button><button class="btn" id="btn-st-map">◎ 지도</button><button class="btn primary big" id="btn-undock">▶ 출항 (Undock)</button></div>
+    </div>
+    <div class="tabs" id="st-tabs">
+      <button data-tab="market" class="active">시장</button>
+      <button data-tab="shipyard">조선소</button>
+      <button data-tab="hangar">격납고</button>
+      <button data-tab="missions">임무 게시판</button>
+      <button data-tab="services">정비 · 보험</button>
+    </div>
+    <div class="win-body" id="st-body"></div>
+  </div>
+
+  <div id="menu" class="window hidden">
+    <div class="win-head">
+      <div class="win-title">NEON//VOID 메뉴</div>
+      <button class="btn" id="btn-menu-close">✕ 닫기</button>
+    </div>
+    <div class="tabs" id="menu-tabs">
+      <button data-tab="pilot" class="active">파일럿</button>
+      <button data-tab="cargo">화물</button>
+      <button data-tab="missions">임무</button>
+      <button data-tab="clan">클랜</button>
+      <button data-tab="ranking">랭킹</button>
+      <button data-tab="settings">설정</button>
+      <button data-tab="help">도움말</button>
+    </div>
+    <div class="win-body" id="menu-body"></div>
+  </div>
+
+  <div id="map" class="hidden">
+    <canvas id="map-canvas"></canvas>
+    <div id="map-top">
+      <div class="win-title">은하 지도</div>
+      <div class="map-hint">휠: 확대/축소 · 드래그: 이동 · 클릭: 선택 · 더블클릭: 오토파일럿 · M/ESC: 닫기</div>
+      <button class="btn" id="btn-map-me">◎ 내 위치</button>
+      <button class="btn" id="btn-map-close">✕</button>
+    </div>
+    <div id="map-side" class="panel hidden"></div>
+  </div>
+
+  <div id="death" class="hidden">
+    <div class="death-box">
+      <div class="glitch big-red" data-text="SHIP DESTROYED">SHIP DESTROYED</div>
+      <div id="death-info"></div>
+      <div class="sub">클론 재생성 중...</div>
+    </div>
+  </div>
+
+  <div id="disconnected" class="hidden">
+    <div class="death-box">
+      <div class="glitch" data-text="CONNECTION LOST">CONNECTION LOST</div>
+      <div id="dc-msg">서버와의 연결이 끊어졌습니다. 재접속 시도 중...</div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

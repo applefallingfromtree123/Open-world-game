@@ -1,0 +1,23 @@
+# Render Blueprint — NEON//VOID
+# Render 대시보드 → New → Blueprint → 이 저장소 선택 으로 자동 배포됩니다.
+services:
+  - type: web
+    name: neon-void
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # 영구 저장이 필요하면 Render PostgreSQL을 만들고 아래 주석을 해제하세요.
+      # - key: DATABASE_URL
+      #   fromDatabase:
+      #     name: neon-void-db
+      #     property: connectionString
+
+# databases:
+#   - name: neon-void-db
+#     plan: free
