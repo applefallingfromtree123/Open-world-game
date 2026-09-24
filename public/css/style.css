@@ -20,6 +20,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 button { font-family: inherit; }
 .hidden { display: none !important; }
 canvas#game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; cursor: crosshair; }
+canvas#overlay { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
 #vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.65) 100%); z-index: 1; }
 #scanlines { position: fixed; inset: 0; pointer-events: none; z-index: 50; background: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 3px); mix-blend-mode: overlay; }
 body.no-scanlines #scanlines { display: none; }

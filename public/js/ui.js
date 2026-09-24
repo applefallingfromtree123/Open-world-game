@@ -2,7 +2,7 @@
 import { G, send, serverTime, saveSettings } from './state.js';
 import { SHIPS, SHIP_ORDER, ITEMS, MARKET_ITEMS, WEAPONS, NPCS, secLabel, secColor, fmtCredits, fmtDist, DOCK_RANGE, INTERACT_RANGE, CLAN_CREATE_COST, STATION_TYPES } from '../shared/data.js';
 import { bodyPos } from '../shared/physics.js';
-import { drawShipShape, resize, hexA } from './render.js';
+import { resize, hexA, shipPreview } from './render.js';
 import { sfx, audioSettings, setVolume, initAudio } from './audio.js';
 import { openMap } from './map.js';
 
@@ -300,7 +300,7 @@ function drawRadar() {
   const cv = $('radar'), c = cv.getContext('2d');
   const S = 200, R = S / 2;
   const me = G.me; if (!me) return;
-  const range = me.w === 2 ? 40000 : Math.max(5000, 4400 / Math.max(0.1, G.cam.userZoom));
+  const range = me.w === 2 ? 40000 : Math.max(5000, G.cam.userDist * 6);
   $('radar-range').textContent = fmtDist(range);
   const k = R / range;
   c.clearRect(0, 0, S, S);
@@ -482,16 +482,7 @@ function hangarHtml(a) {
   }).join('')}</div>`;
 }
 function drawShipPreviews() {
-  const t = performance.now() / 1000;
-  document.querySelectorAll('canvas[data-ship]').forEach((cv) => {
-    const c = cv.getContext('2d');
-    const s = SHIPS[cv.dataset.ship];
-    c.clearRect(0, 0, cv.width, cv.height);
-    c.save(); c.translate(cv.width / 2, cv.height / 2); c.rotate(-0.35);
-    const r = Math.min(46, 20 + s.radius * 0.7);
-    drawShipShape(c, s.shape, s.color, r, 1, t);
-    c.restore();
-  });
+  document.querySelectorAll('canvas[data-ship]').forEach((cv) => { try { shipPreview(cv, cv.dataset.ship); } catch (e) { console.warn(e); } });
 }
 
 const MTYPE = { delivery: ['배송', '#00f0ff'], bounty: ['현상금', '#ff2255'], mining: ['조달', '#ffe600'], explore: ['탐사', '#c070ff'] };
@@ -655,7 +646,7 @@ function bindSettings() {
 
 function helpHtml() {
   return `<div class="help-grid">
-    <div><h4>조작</h4><kbd>W A S D</kbd> 추진/측면 이동<br><kbd>마우스</kbd> 조준 (함선이 커서를 향함)<br><kbd>좌클릭</kbd>/<kbd>Space</kbd> 사격<br><kbd>Shift</kbd> 부스터 (에너지 소모)<br><kbd>J</kbd> 워프 드라이브 켜기/끄기<br><kbd>F</kbd> 채굴 레이저<br><kbd>R</kbd> 신호 스캐너<br><kbd>E</kbd> 도킹 / 해킹<br><kbd>M</kbd> 은하 지도 · <kbd>X</kbd> 오토파일럿 해제<br><kbd>휠</kbd> 확대/축소 · <kbd>Tab</kbd> 메뉴 · <kbd>Enter</kbd> 채팅</div>
+    <div><h4>조작</h4><kbd>W A S D</kbd> 추진/측면 이동<br><kbd>마우스</kbd> 조준 (함선이 커서를 향함)<br><kbd>우클릭 드래그</kbd> 3D 카메라 회전 · <kbd>C</kbd> 카메라 초기화<br><kbd>좌클릭</kbd>/<kbd>Space</kbd> 사격<br><kbd>Shift</kbd> 부스터 (에너지 소모)<br><kbd>J</kbd> 워프 드라이브 켜기/끄기<br><kbd>F</kbd> 채굴 레이저<br><kbd>R</kbd> 신호 스캐너<br><kbd>E</kbd> 도킹 / 해킹<br><kbd>M</kbd> 은하 지도 · <kbd>X</kbd> 오토파일럿 해제<br><kbd>휠</kbd> 확대/축소 · <kbd>Tab</kbd> 메뉴 · <kbd>Enter</kbd> 채팅</div>
     <div><h4>이동과 워프</h4>행성 사이는 순간이동 없이 직접 비행합니다. <b>J</b>를 누르면 워프 드라이브가 충전된 뒤 초고속으로 비행합니다. 워프 중에는 선회가 느리고 사격할 수 없으며, 항성 근처에서는 강제로 워프가 해제됩니다. 충전 중 피격되면 워프가 취소됩니다!<br><br><b>M</b> 은하 지도에서 목적지를 더블클릭하면 오토파일럿이 자동으로 워프해 이동하고, 스테이션이라면 자동 도킹합니다.</div>
     <div><h4>돈 버는 법</h4>⛏ <b>채굴</b>: 소행성대에서 F로 광석 채굴 → 스테이션 시장에 판매<br>⇄ <b>무역</b>: ▼생산 스테이션에서 사서 ▲수요 스테이션에 판매<br>📦 <b>임무</b>: 배송 · 현상금 · 조달 · 탐사 계약<br>☠ <b>사냥</b>: 해적 격추 현상금 + 전리품<br>✦ <b>탐험</b>: R로 이상 신호 스캔 → 찾아가서 E로 해킹 → 크레딧 + 희귀품<br>★ <b>발견</b>: 처음 방문하는 성계마다 보너스</div>
     <div><h4>보안 등급</h4><span style="color:#2cff9a">하이섹 (0.5 이상)</span>: PvP 불가, 안전하지만 수익이 낮음<br><span style="color:#ff8a00">로우섹 (0.1~0.4)</span>: PvP 가능. 무고한 파일럿을 먼저 공격하면 5분간 범죄자(☠) 지정 — 누구나 공격 가능하고 현상금이 걸림<br><span style="color:#ff1f4b">널섹 (0.0 이하)</span>: 무법지대. 최고급 광석, 강력한 해적, 워로드 보스, 클랜 주권 비콘<br><br>파괴되면 화물을 잃고 함선도 잃습니다(셔틀 제외). <b>보험</b>을 꼭 드세요!</div>

@@ -1,6 +1,6 @@
 // NEON//VOID 클라이언트 진입점 — 네트워크, 입력, 예측, 게임 루프
 import { G, send, serverTime } from './state.js';
-import { initRender, render, explosion, sparks, spawnParticle, titleBackground, screenSize } from './render.js';
+import { initRender, render, explosion, sparks, spawnParticle, titleBackground, aimAt } from './render.js';
 import * as UI from './ui.js';
 import { openMap, closeMap, isMapOpen } from './map.js';
 import { initAudio, sfx } from './audio.js';
@@ -260,6 +260,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyR': send({ t: 'act', a: 'scan' }); break;
     case 'KeyE': send({ t: 'act', a: 'interact' }); break;
     case 'KeyX': send({ t: 'ap', clear: true }); UI.toast('오토파일럿 해제', 'info'); break;
+    case 'KeyC': G.cam.yaw = Math.PI / 2; G.cam.pitch = 0.62; break;
     case 'Equal': case 'NumpadAdd': zoomBy(1.2); break;
     case 'Minus': case 'NumpadSubtract': zoomBy(1 / 1.2); break;
   }
@@ -267,12 +268,26 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { if (KEYMAP[e.code]) heldKeys &= ~KEYMAP[e.code]; });
 window.addEventListener('blur', () => { heldKeys = 0; G.input.mouseDown = false; });
 
-canvas.addEventListener('mousemove', (e) => { G.input.mx = e.clientX; G.input.my = e.clientY; });
-canvas.addEventListener('mousedown', (e) => { initAudio(); if (e.button === 0) G.input.mouseDown = true; if (typing()) document.activeElement.blur(); });
-window.addEventListener('mouseup', (e) => { if (e.button === 0) G.input.mouseDown = false; });
+// 우클릭 드래그: 3D 카메라 회전
+let orbit = null;
+canvas.addEventListener('mousemove', (e) => {
+  G.input.mx = e.clientX; G.input.my = e.clientY;
+  if (orbit) {
+    G.cam.yaw += (e.clientX - orbit.x) * 0.006;
+    G.cam.pitch = Math.max(0.08, Math.min(1.5, G.cam.pitch + (e.clientY - orbit.y) * 0.005));
+    orbit.x = e.clientX; orbit.y = e.clientY;
+  }
+});
+canvas.addEventListener('mousedown', (e) => {
+  initAudio();
+  if (e.button === 0) G.input.mouseDown = true;
+  if (e.button === 2 || e.button === 1) { orbit = { x: e.clientX, y: e.clientY }; e.preventDefault(); }
+  if (typing()) document.activeElement.blur();
+});
+window.addEventListener('mouseup', (e) => { if (e.button === 0) G.input.mouseDown = false; if (e.button === 2 || e.button === 1) orbit = null; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive: false });
-function zoomBy(f) { G.cam.userZoom = Math.max(0.03, Math.min(1.6, G.cam.userZoom * f)); }
+function zoomBy(f) { G.cam.userDist = Math.max(160, Math.min(60000, G.cam.userDist / f)); }
 
 // 터치 (간단한 모바일 지원: 누르고 있는 방향으로 추진 + 사격)
 canvas.addEventListener('touchstart', (e) => { initAudio(); const t = e.touches[0]; G.input.mx = t.clientX; G.input.my = t.clientY; G.touch = true; }, { passive: true });
@@ -281,15 +296,11 @@ canvas.addEventListener('touchend', () => { G.touch = false; }, { passive: true 
 
 let lastSent = { k: -1, a: 0, t: 0 };
 function updateInput() {
-  const { W, H } = screenSize();
   let keys = UI.anyWindowOpen() ? 0 : heldKeys;
   if (!UI.anyWindowOpen() && G.input.mouseDown) keys |= K.FIRE;
   if (G.touch) keys |= K.UP;
   G.input.keys = keys;
-  if (G.me && !G.me.dock) {
-    const X = (G.self.x - G.cam.x) * G.cam.zoom + W / 2, Y = (G.self.y - G.cam.y) * G.cam.zoom + H / 2;
-    if (G.input.mx || G.input.my) G.input.aim = Math.atan2(G.input.my - Y, G.input.mx - X);
-  }
+  if (G.me && !G.me.dock && (G.input.mx || G.input.my)) G.input.aim = aimAt(G.input.mx, G.input.my);
   const t = performance.now();
   if (keys !== lastSent.k || (Math.abs(angDiff(G.input.aim, lastSent.a)) > 0.01 && t - lastSent.t > 45) || t - lastSent.t > 250) {
     send({ t: 'in', k: keys, a: Math.round(G.input.aim * 1000) / 1000 });
@@ -356,10 +367,7 @@ function frame(ts) {
       else { e.dx += (tx - e.dx) * k + e.svx * dt * (1 - k); e.dy += (ty - e.dy) * k + e.svy * dt * (1 - k); }
       e.da += angDiff(e.sa, e.da) * k;
     }
-    // 카메라
-    const wz = G.self.warp === 2 ? 0.35 : 1;
-    const targetZoom = G.cam.userZoom * wz;
-    G.cam.zoom += (targetZoom - G.cam.zoom) * Math.min(1, dt * 3);
+    // 카메라 대상
     G.cam.x = G.self.x; G.cam.y = G.self.y;
     UI.frame(dt, t);
   }

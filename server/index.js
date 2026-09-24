@@ -11,6 +11,7 @@ import { TICK_RATE } from '../public/shared/data.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
 const PORT = Number(process.env.PORT) || 3000;
+const THREE_DIR = path.join(__dirname, '..', 'node_modules', 'three');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -30,13 +31,16 @@ const server = http.createServer((req, res) => {
   }
   let p = decodeURIComponent(url.pathname);
   if (p === '/') p = '/index.html';
-  const file = path.normalize(path.join(PUBLIC, p));
-  if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
+  // Three.js는 node_modules에서 직접 제공 (CDN 의존 없음)
+  let base = PUBLIC, rel = p;
+  if (p.startsWith('/vendor/three/')) { base = THREE_DIR; rel = p.slice('/vendor/three'.length); }
+  const file = path.normalize(path.join(base, rel));
+  if (!file.startsWith(base)) { res.writeHead(403); return res.end(); }
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) { res.writeHead(404); return res.end('Not found'); }
     res.writeHead(200, {
       'content-type': MIME[path.extname(file)] || 'application/octet-stream',
-      'cache-control': p === '/index.html' ? 'no-cache' : 'public, max-age=300',
+      'cache-control': p === '/index.html' ? 'no-cache' : base === THREE_DIR ? 'public, max-age=86400' : 'public, max-age=300',
     });
     fs.createReadStream(file).pipe(res);
   });

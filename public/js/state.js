@@ -10,7 +10,7 @@ export const G = {
   ships: new Map(), missiles: new Map(), loots: new Map(), dep: new Set(), anomalies: new Map(),
   shots: [], particles: [], rings: [], beams: [],
   timeOffset: 0, rtt: 0.12,
-  cam: { x: 0, y: 0, zoom: 0.85, userZoom: 0.85, shake: 0 },
+  cam: { x: 0, y: 0, yaw: Math.PI / 2, pitch: 0.62, dist: 600, userDist: 600, shake: 0 },
   input: { keys: 0, aim: 0, mx: 0, my: 0, mouseDown: false },
   lastSnap: 0,
   settings: { quality: 'high', names: true, scanlines: true },
