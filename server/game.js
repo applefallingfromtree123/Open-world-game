@@ -228,7 +228,7 @@ export class Game {
     conn.acct = acct;
     this.players.set(p.id, p);
     this.send(conn, {
-      t: 'welcome', id: p.id, token: acct.token, name: acct.name, st: this.time(),
+      t: 'welcome', id: p.id, token: acct.token, name: acct.name, st: this.time(), build: this.build,
       world: this.clientWorld, chat: this.chatLog.slice(-40),
     });
     this.sendAcct(p);

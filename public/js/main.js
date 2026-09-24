@@ -52,6 +52,13 @@ const localCd = [];
 function handle(m) {
   switch (m.t) {
     case 'welcome': {
+      // 탭을 연 상태에서 서버가 새 버전으로 재배포되면 자동 새로고침
+      if (G.build && m.build && G.build !== m.build) {
+        UI.toast('새 버전이 배포되었습니다. 곧 새로고침합니다...', 'warn');
+        setTimeout(() => location.reload(), 1500);
+        return;
+      }
+      G.build = m.build;
       G.id = m.id; G.name = m.name; G.token = m.token;
       try { localStorage.setItem('nv_name', m.name); localStorage.setItem('nv_token', m.token); } catch {}
       setupWorld(m.world);

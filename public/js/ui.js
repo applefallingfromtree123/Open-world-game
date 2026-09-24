@@ -685,7 +685,7 @@ function settingsHtml() {
     <label class="flex"><input type="checkbox" id="set-quality" ${G.settings.quality === 'high' ? 'checked' : ''}> 고품질 그래픽 (글로우 · 파티클)</label>
     <label class="flex"><input type="checkbox" id="set-names" ${G.settings.names ? 'checked' : ''}> 함선 이름표 표시</label>
     <label class="flex"><input type="checkbox" id="set-scan" ${G.settings.scanlines ? 'checked' : ''}> CRT 스캔라인 효과</label>
-    <div class="flex"><button class="btn warn" data-act="logout">로그아웃</button></div>
+    <div class="flex"><button class="btn warn" data-act="logout">로그아웃</button><span class="dim mono">빌드 ${esc(G.build || '-')}</span></div>
   </div>`;
 }
 function bindSettings() {
