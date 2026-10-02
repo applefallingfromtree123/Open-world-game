@@ -71,14 +71,26 @@ npm start
 
 포트는 Render가 주는 `PORT` 환경 변수를 자동으로 사용하며, WebSocket(`/ws`)도 같은 포트로 동작합니다.
 
-### ⚠ 데이터 영구 저장
-Render 무료 인스턴스의 디스크는 **재배포·재시작 시 초기화**됩니다. 계정/클랜을 영구 보존하려면 둘 중 하나를 설정하세요.
+### 💾 데이터 저장 (Render 무료 서버 슬립 대비)
 
-- **PostgreSQL (추천)**: Render에서 PostgreSQL을 만든 뒤 웹 서비스 환경 변수에 `DATABASE_URL`(Internal Database URL)을 추가하면 자동으로 DB에 저장됩니다. (`render.yaml`의 주석을 해제해도 됩니다.)
-- **Persistent Disk** (유료 플랜): 디스크를 `/var/data`에 마운트하고 `DATA_DIR=/var/data` 환경 변수를 설정합니다.
+Render 무료 인스턴스는 15분간 접속이 없으면 잠들고, 다시 깨어날 때 **디스크가 초기화**됩니다. 그래서 세 겹으로 계정을 지킵니다.
 
-서버는 30초마다, 그리고 종료 신호(SIGTERM)를 받을 때 저장합니다.
-무료 인스턴스는 15분간 접속이 없으면 잠들며, 다음 접속 시 깨어나는 데 최대 1분 정도 걸립니다.
+| 방법 | 설정 | 보호 범위 |
+|---|---|---|
+| ① 잠들지 않게 하기 | 자동 (Render가 주는 `RENDER_EXTERNAL_URL`로 10분마다 자기 호출) | 슬립 자체를 막음. 단 재배포·재시작 시엔 디스크 초기화 |
+| ② 브라우저 백업 | 자동 | 서버가 서명한 계정 사본을 각 플레이어 브라우저에 보관 → 서버가 초기화돼도 로그인 시 자동 복구 (위조 불가). 같은 브라우저에서만 복구됨 |
+| ③ **무료 PostgreSQL (추천)** | `DATABASE_URL` 1개 입력 | 계정·클랜·주권·시장까지 **영구 보존**, 어느 기기에서나 |
+
+**③ Neon 무료 DB 연결 방법 (약 3분)**
+1. [neon.tech](https://neon.tech)에 가입 → **Create project** (무료 플랜, 지역은 Singapore 또는 가까운 곳).
+2. 대시보드의 **Connection string**을 복사합니다. (`postgresql://...neon.tech/neondb?sslmode=require` 형태)
+3. Render 대시보드 → 웹 서비스 → **Environment** → `DATABASE_URL` 에 붙여넣고 저장 → 자동 재배포.
+4. Render 로그에 `[db] PostgreSQL 저장소 사용 — 계정이 영구 보존됩니다.` 가 보이면 완료.
+
+Render 자체 PostgreSQL을 써도 되지만 무료 DB는 30일 후 만료되므로 Neon(무료, 만료 없음)을 추천합니다.
+서버는 변경 후 5초 이내 + 15초마다 + 종료 시 저장하며, 저장소를 읽지 못하면 빈 세계로 시작하지 않고 재시작합니다(기존 데이터 덮어쓰기 방지).
+
+> keep-alive는 무료 인스턴스 사용 시간(월 750시간)을 거의 다 씁니다. 다른 무료 서비스도 돌린다면 `KEEP_ALIVE=false`로 끌 수 있습니다.
 
 ## 환경 변수
 
@@ -88,6 +100,8 @@ Render 무료 인스턴스의 디스크는 **재배포·재시작 시 초기화*
 | `DATABASE_URL` | PostgreSQL 연결 문자열 — 설정 시 DB 저장 사용 |
 | `PGSSL` | `false`로 설정하면 DB SSL 비활성화 (로컬 PostgreSQL용) |
 | `DATA_DIR` | 파일 저장 경로 (기본 `./data`) |
+| `SAVE_SECRET` | 브라우저 백업 서명 키 (없으면 Render 서비스 ID로 자동 대체) |
+| `KEEP_ALIVE` | `false`면 슬립 방지 자기 호출 끄기 |
 | `BOT_COUNT` | 로그 파일럿 봇 수 (기본 30, 0이면 비활성) |
 
 ## 구조

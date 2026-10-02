@@ -27,7 +27,7 @@ function connect() {
     let name = null, token = null;
     try { name = localStorage.getItem('nv_name'); token = localStorage.getItem('nv_token'); } catch {}
     if (pendingLogin) { send(pendingLogin); pendingLogin = null; }
-    else if (name && token) send({ t: 'resume', name, token });
+    else if (name && token) send({ t: 'resume', name, token, backup: getBackup(name) });
   };
   ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
   ws.onclose = () => {
@@ -40,8 +40,12 @@ function connect() {
 }
 connect();
 
+// 서버가 보내준 서명된 계정 백업 (서버 저장소가 초기화돼도 로그인 시 복구에 사용)
+const backupKey = (name) => 'nv_bk_' + String(name || '').toLowerCase();
+function getBackup(name) { try { return JSON.parse(localStorage.getItem(backupKey(name)) || 'null'); } catch { return null; } }
+
 export function login(name, pass, mode) {
-  const msg = { t: 'login', name, pass, mode };
+  const msg = { t: 'login', name, pass, mode, backup: getBackup(name) };
   if (G.connected) send(msg); else pendingLogin = msg;
 }
 UI.onLogin(login);
@@ -80,6 +84,7 @@ function handle(m) {
       alert(m.msg); location.reload();
       break;
     case 's': onSnapshot(m); break;
+    case 'backup': try { localStorage.setItem(backupKey(m.name), JSON.stringify({ data: m.data, sig: m.sig })); } catch {} break;
     case 'acct': G.acct = m; UI.onAcct(); break;
     case 'station': G.station = m; UI.onStation(); break;
     case 'undocked': UI.closeStation(); sfx.warpOut(); break;

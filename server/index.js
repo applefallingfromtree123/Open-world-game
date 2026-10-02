@@ -25,7 +25,13 @@ const store = new Store();
 await store.init();
 const game = new Game(store);
 game.build = BUILD;
-await game.init();
+try {
+  await game.init();
+} catch (e) {
+  // 저장소를 읽지 못한 채 빈 세계로 시작하면 기존 데이터를 덮어쓰게 되므로 종료 (Render가 자동 재시작)
+  console.error('[server] 저장 데이터를 불러오지 못해 종료합니다:', e.message);
+  process.exit(1);
+}
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -64,7 +70,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 8 * 1024 });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
 wss.on('connection', (ws, req) => {
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   ws.isAlive = true;
@@ -97,7 +103,15 @@ setInterval(() => {
 }, 1000 / TICK_RATE / 2);
 
 // 자동 저장
-setInterval(() => game.save(), 30000);
+setInterval(() => game.save(), 15000);
+
+// Render 무료 인스턴스는 15분간 외부 요청이 없으면 잠들고, 깨어날 때 디스크가 초기화된다.
+// Render가 자동으로 넣어주는 공개 주소로 10분마다 자기 자신을 호출해 잠들지 않게 한다. (KEEP_ALIVE=false 로 끄기)
+const SELF_URL = process.env.RENDER_EXTERNAL_URL;
+if (SELF_URL && process.env.KEEP_ALIVE !== 'false') {
+  setInterval(() => { fetch(`${SELF_URL}/healthz`).catch(() => {}); }, 10 * 60 * 1000);
+  console.log('[server] keep-alive 활성:', SELF_URL);
+}
 
 let shuttingDown = false;
 async function shutdown(sig) {

@@ -54,6 +54,10 @@ export class Game {
     this.anomalies = new Map();
     this.fx = [];
     this.nid = 1;
+    this.boot = Date.now().toString(36).slice(-4);   // 재시작 후에도 임무 id가 겹치지 않도록
+    // 브라우저 백업 서명 키: SAVE_SECRET → Render 서비스 ID(외부 비공개) → 개발용 기본값
+    this.saveSecret = process.env.SAVE_SECRET || (process.env.RENDER_SERVICE_ID ? 'nv:' + process.env.RENDER_SERVICE_ID : 'neon-void-dev-secret');
+    this.saveTimer = null;
     this.astAmt = this.world.asteroids.map((a) => a.max);
     this.astRespawn = new Map();
     this.spawnSlots = [];
@@ -90,6 +94,50 @@ export class Game {
     return { v: 1, accounts: this.accounts, clans: this.clans, sov: this.sov, markets: this.markets };
   }
   async save() { await this.store.save(this.serialize()); }
+  // 중요한 변경 직후 몇 초 안에 저장 (서버가 갑자기 잠들어도 손실 최소화)
+  saveSoon() {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => { this.saveTimer = null; this.save(); }, 5000);
+  }
+
+  // ------------------------------------------------------------
+  //  브라우저 백업 — 서버 저장소가 초기화돼도 플레이어 브라우저에 보관된 서명된 사본으로 복구
+  // ------------------------------------------------------------
+  signBackup(obj) {
+    const data = JSON.stringify(obj);
+    return { data, sig: crypto.createHmac('sha256', this.saveSecret).update(data).digest('hex') };
+  }
+  readBackup(b) {
+    if (!b || typeof b.data !== 'string' || typeof b.sig !== 'string' || b.data.length > 60000) return null;
+    const sig = crypto.createHmac('sha256', this.saveSecret).update(b.data).digest('hex');
+    if (sig.length !== b.sig.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(b.sig))) return null;
+    try { const o = JSON.parse(b.data); return o && o.v === 1 && o.acct ? o : null; } catch { return null; }
+  }
+  sendBackup(p) {
+    if (!p.dead) this.persistPlayer(p);
+    const a = p.acct;
+    const clan = a.clan && this.clans[a.clan] ? this.clans[a.clan] : null;
+    this.send(p.conn, { t: 'backup', name: a.name, ...this.signBackup({ v: 1, ts: Date.now(), acct: a, clan }) });
+    p.backupAt = now(); p.backupDirty = false;
+  }
+  // 서버에 계정이 없거나, 같은 이름으로 나중에 새로 만든 계정만 있을 때 백업을 적용
+  canRestore(bk, key) {
+    if (!bk || String(bk.acct.name || '').toLowerCase() !== key) return false;
+    const cur = this.accounts[key];
+    return !cur || cur.created > bk.acct.created;
+  }
+  applyBackup(bk, key) {
+    const acct = bk.acct;
+    this.accounts[key] = acct;
+    if (bk.clan && bk.clan.tag) {
+      const c = this.clans[bk.clan.tag];
+      if (!c) this.clans[bk.clan.tag] = bk.clan;
+      else if (!c.members.includes(acct.name)) c.members.push(acct.name);
+    }
+    console.log('[game] 브라우저 백업에서 계정 복구:', acct.name);
+    this.saveSoon();
+    return acct;
+  }
 
   persistPlayer(p) {
     const a = p.acct;
@@ -111,7 +159,7 @@ export class Game {
       const t = now();
       if (t - conn.msgWindow > 1) { conn.msgWindow = t; conn.msgs = 0; }
       if (++conn.msgs > 80) return;
-      if (data.length > 4096) return;
+      if (data.length > 65536) return;
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
       if (!msg || typeof msg.t !== 'string') return;
@@ -178,6 +226,12 @@ export class Game {
     conn.busy = true;
     try {
       let acct = this.accounts[key];
+      let restored = false;
+      const bk = m.backup ? this.readBackup(m.backup) : null;
+      if (bk && this.canRestore(bk, key)) {
+        if ((await scryptAsync(pass, bk.acct.salt)) !== bk.acct.hash) return this.send(conn, { t: 'loginErr', msg: '비밀번호가 올바르지 않습니다.' });
+        acct = this.applyBackup(bk, key); restored = true;
+      }
       if (acct) {
         const h = await scryptAsync(pass, acct.salt);
         if (h !== acct.hash) return this.send(conn, { t: 'loginErr', msg: '비밀번호가 올바르지 않습니다.' });
@@ -187,18 +241,26 @@ export class Game {
         acct = this.newAccount(name, salt, await scryptAsync(pass, salt));
         this.accounts[key] = acct;
         console.log('[game] 신규 파일럿', name);
+        this.saveSoon();
       }
       acct.token = crypto.randomBytes(18).toString('hex');
       this.enter(conn, acct);
+      if (restored) this.toast(conn.player, '서버가 초기화되어 브라우저에 보관된 백업으로 계정을 복구했습니다.', 'good');
     } finally { conn.busy = false; }
   }
 
   resume(conn, m) {
     if (conn.player) return;
     const name = String(m.name || '').toLowerCase();
-    const acct = this.accounts[name];
+    let acct = this.accounts[name];
+    let restored = false;
+    if (!acct || acct.token !== m.token) {
+      const bk = m.backup ? this.readBackup(m.backup) : null;
+      if (bk && typeof m.token === 'string' && bk.acct.token === m.token && this.canRestore(bk, name)) { acct = this.applyBackup(bk, name); restored = true; }
+    }
     if (!acct || !acct.token || typeof m.token !== 'string' || acct.token !== m.token) return this.send(conn, { t: 'loginErr', msg: '', silent: true });
     this.enter(conn, acct);
+    if (restored) this.toast(conn.player, '서버가 초기화되어 브라우저에 보관된 백업으로 계정을 복구했습니다.', 'good');
   }
 
   newAccount(name, salt, hash) {
@@ -232,6 +294,7 @@ export class Game {
       world: this.clientWorld, chat: this.chatLog.slice(-40),
     });
     this.sendAcct(p);
+    this.sendBackup(p);
     this.sendInfo(conn);
     if (p.docked) this.sendStation(p);
     this.broadcastClan(acct.clan);
@@ -287,7 +350,7 @@ export class Game {
       stats: a.stats, clan: a.clan, home: a.home, discovered: a.discovered,
     };
   }
-  sendAcct(p) { p.dirty = false; this.send(p.conn, this.acctPayload(p)); }
+  sendAcct(p) { p.dirty = false; p.backupDirty = true; this.send(p.conn, this.acctPayload(p)); this.saveSoon(); }
 
   sendInfo(conn) {
     const clans = {};
@@ -754,7 +817,7 @@ export class Game {
   genMission(stId) {
     const st = this.stById[stId];
     const sys = this.sysById[st.sys];
-    const id = this.id('m');
+    const id = 'm' + this.boot + (this.nid++).toString(36);
     const roll = Math.random();
     const riskSys = (s) => 1 - clamp(s.sec, 0, 1);
     if (roll < 0.45) {
@@ -1566,6 +1629,8 @@ export class Game {
       }
       for (const slot of this.botSlots) if (!slot.npc && slot.respawnAt <= t) slot.npc = this.spawnBot(slot);
       this.tickSov();
+      // 변경이 있으면 10초, 없어도 60초마다 브라우저 백업 갱신
+      for (const p of this.players.values()) if (t - (p.backupAt || 0) > (p.backupDirty ? 10 : 60)) this.sendBackup(p);
     }
     if (t - this.lastMarket >= 20) {
       this.lastMarket = t;
