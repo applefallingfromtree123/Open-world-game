@@ -263,8 +263,8 @@ export class World {
     return best;
   }
   massLocked(p) {
-    for (const s of this.stations) if (s.pos.distanceToSquared(p) < 5000 * 5000) return true;
-    for (const pl of this.planets) { const d = pl.pos.distanceTo(p); if (d < pl.radius * 1.15 + 1500) return true; }
+    for (const s of this.stations) if (s.pos.distanceToSquared(p) < 3000 * 3000) return true;
+    for (const pl of this.planets) { const d = pl.pos.distanceTo(p); if (d < pl.radius * 1.08 + 800) return true; }
     if (this.star.pos.distanceTo(p) < this.star.radius * 1.6) return true;
     for (const s of this.ships) if (!s.dead && !s.isPlayer && s.spec.mass >= 2.5 && s.brain && s.brain.role !== 'wing' && this.hostile(s, this.player) && s.pos.distanceToSquared(p) < 3000 * 3000) return true;
     return false;

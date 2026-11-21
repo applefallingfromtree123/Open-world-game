@@ -18,13 +18,13 @@ export function initMap(g) {
   cv.addEventListener('mousedown', (e) => { M.drag = true; M.moved = 0; lx = e.clientX; ly = e.clientY; });
   window.addEventListener('mouseup', (e) => {
     if (!M.drag) return; M.drag = false;
-    if (M.moved < 5 && game.mapOpen) { M.sel = M.hover; renderSide(); }
+    if (M.moved < 5 && game.mapOpen && M.hover) { M.sel = M.hover; if (M.sel.id !== game.world.sys.id) plot(M.sel.id, true); else renderSide(); }
   });
   cv.addEventListener('mousemove', (e) => {
     if (M.drag) { M.yaw -= (e.clientX - lx) * 0.006; M.pitch = Math.max(0.1, Math.min(1.5, M.pitch + (e.clientY - ly) * 0.005)); M.moved += Math.abs(e.clientX - lx) + Math.abs(e.clientY - ly); lx = e.clientX; ly = e.clientY; }
     M.mx = e.clientX; M.my = e.clientY;
   });
-  cv.addEventListener('dblclick', () => { if (M.hover) { M.sel = M.hover; plot(M.sel.id); } });
+  cv.addEventListener('dblclick', () => { if (M.hover && M.hover.id !== game.world.sys.id) { M.sel = M.hover; plot(M.sel.id); game.tryHyperjump(); } });
   cv.addEventListener('wheel', (e) => { M.zoom = Math.max(2.5, Math.min(30, M.zoom * (1 - Math.sign(e.deltaY) * 0.1))); e.preventDefault(); }, { passive: false });
   document.querySelectorAll('#map-tabs button').forEach((b) => b.addEventListener('click', () => { M.tab = b.dataset.tab; document.querySelectorAll('#map-tabs button').forEach((o) => o.classList.toggle('active', o === b)); renderSide(); }));
 }
@@ -118,14 +118,16 @@ export function drawMap(dt) {
   }
 }
 
-function plot(id) {
+function plot(id, quiet) {
   const range = game.playerShip.stats.jump;
   const r = findRoute(game.galaxy, game.world.sys.id, id, range);
-  if (!r) { game.msg(`도약 범위(${range.toFixed(1)} ly)로는 도달할 수 없습니다`, 'warn'); return; }
+  if (!r) { if (!quiet) game.msg(`도약 범위(${range.toFixed(1)} ly)로는 도달할 수 없습니다`, 'warn'); renderSide(); return; }
   S.save.route = r;
-  game.msg(r.length ? `경로 설정: ${r.length}회 도약 — H키로 하이퍼점프` : '현재 성계입니다', 'info');
+  if (!quiet) game.msg(r.length ? `경로 설정: ${r.length}회 도약 — H키로 하이퍼점프` : '현재 성계입니다', 'info');
   renderSide();
 }
+export function selectedSystem() { return M.sel; }
+export function selectSystem(id) { M.sel = game.galaxy.byId[id]; plot(id, true); }
 
 function renderSide() {
   if (!side) return;
@@ -153,11 +155,13 @@ function renderSide() {
   if (game.discoveries && game.discoveries[s.id]) html += `<div class="ms-sub">최초 발견자: <b>${esc(game.discoveries[s.id])}</b></div>`;
   else if (disc) html += `<div class="ms-sub">최초 발견자: <b>당신</b></div>`;
   html += `<div class="ms-desc dim">${fac.desc}</div><div class="ms-btns">`;
-  if (s.id !== cur.id) html += `<button class="btn primary" id="ms-plot">경로 설정</button>`;
+  const onRoute = (S.save.route || []).length && S.save.route[S.save.route.length - 1] === s.id;
+  if (s.id !== cur.id && route) html += onRoute ? `<button class="btn primary" id="ms-jump">▶ 하이퍼점프 (H)</button>` : `<button class="btn primary" id="ms-plot">경로 설정</button>`;
   if ((S.save.route || []).length) html += `<button class="btn" id="ms-clear">경로 해제</button>`;
   html += '</div>';
   side.innerHTML = html;
   const b = document.getElementById('ms-plot'); if (b) b.onclick = () => plot(s.id);
+  const j = document.getElementById('ms-jump'); if (j) j.onclick = () => game.tryHyperjump();
   const c = document.getElementById('ms-clear'); if (c) c.onclick = () => { S.save.route = []; renderSide(); };
 }
 

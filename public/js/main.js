@@ -8,7 +8,7 @@ import { initHud, drawHud, HUD } from './hud.js';
 import { IN, initInput, hit, down, endFrame, updateStick, releaseLock, centerStick } from './input.js';
 import { initHangar, updateHangar, showShip, hangarInput, HG } from './hangar.js';
 import { initUI, toast, commsLine, banner, updateHudDom, openStation, closeStation, refreshStation, openMenu, closeMenu } from './ui.js';
-import { initMap, openMap, drawMap, renderSide } from './map.js';
+import { initMap, openMap, drawMap, renderSide, selectedSystem } from './map.js';
 import { Net } from './net.js';
 import { World, systemData } from './world.js';
 import { Missions } from './missions.js';
@@ -454,24 +454,39 @@ function buildOutpostHere() {
 // ------------------------------------------------------------
 function tryHyperjump() {
   const P = game.playerShip, w = game.world;
+  if (!P || P.dead || game.hyper) return;
   if (game.hyperCharge > 0) { game.hyperCharge = 0; game.msg('하이퍼점프 취소', 'info'); return; }
-  const route = S.save.route || [];
-  if (!route.length) { game.msg('은하 지도(M)에서 목적지를 선택해 경로를 설정하세요', 'warn'); return; }
+  // 최종 목적지 결정: 저장된 경로 → 지도에서 선택한 성계
+  let dest = (S.save.route || []).length ? S.save.route[S.save.route.length - 1] : null;
+  const sel = selectedSystem();
+  if (!dest && sel && sel.id !== w.sys.id) dest = sel.id;
+  if (!dest || dest === w.sys.id) {
+    game.msg('목적지가 없습니다 — 은하 지도에서 성계를 클릭한 뒤 H를 누르세요', 'warn');
+    if (!game.mapOpen) toggleMap(true);
+    return;
+  }
+  // 현재 위치 기준으로 경로 재계산 (도약 거리 반영)
+  const route = findRoute(game.galaxy, w.sys.id, dest, P.stats.jump);
+  if (!route || !route.length) { game.msg(`도약 거리(${P.stats.jump.toFixed(1)} ly)로는 ${game.galaxy.byId[dest].name}에 갈 수 없습니다 — 하이퍼드라이브를 업그레이드하세요`, 'warn'); return; }
+  S.save.route = route;
   const next = route[0];
   const dist = game.galaxy.byId[next].pos.distanceTo(w.sys.pos);
-  if (dist > P.stats.jump) { game.msg(`도약 거리 부족 (${dist.toFixed(1)} / ${P.stats.jump.toFixed(1)} ly) — 경로를 다시 설정하세요`, 'warn'); return; }
   const fuel = 0.6 + dist * 0.2 * Math.sqrt(P.spec.mass);
-  if (P.fuel < fuel) { game.msg(`연료 부족 (${fuel.toFixed(1)}t 필요) — 스테이션에서 보급하거나 연료 스쿠프로 항성에서 보급`, 'bad'); return; }
-  if (w.massLocked(P.pos) && P.cruise !== 2) { game.msg('질량 고정 상태입니다 — 천체/스테이션에서 멀어지세요', 'warn'); return; }
+  if (P.fuel < fuel) { game.msg(`연료 부족 (${fuel.toFixed(1)}t 필요, 보유 ${P.fuel.toFixed(1)}t) — 스테이션 서비스 탭에서 보급하세요`, 'bad'); return; }
+  if (game.mapOpen) toggleMap(false);
+  if (game.docked) game.undock();
   game.hyperCharge = 0.001; game.hyperTarget = next; game.hyperFuel = fuel;
   sfx.hyperCharge();
-  game.msg(`하이퍼점프 충전 — ${game.galaxy.byId[next].name}`, 'info');
+  game.msg(`하이퍼점프 충전 — ${game.galaxy.byId[next].name}${route.length > 1 ? ` (남은 도약 ${route.length}회)` : ''}`, 'info');
 }
+game.tryHyperjump = tryHyperjump;
 function doHyper(dt) {
   const P = game.playerShip;
   if (game.hyperCharge > 0) {
-    game.hyperCharge += dt;
     if (P.dead || game.docked) { game.hyperCharge = 0; return; }
+    // 질량 고정 중에는 충전이 멈춤 (멀어지면 자동 재개)
+    if (P.cruise !== 2 && game.world.massLocked(P.pos)) game.hint = '질량 고정 — 스테이션/행성에서 멀어지면 점프 충전이 계속됩니다 (J 크루즈 추천)';
+    else game.hyperCharge += dt;
     if (game.hyperCharge >= 4) {
       game.hyperCharge = 0;
       game.hyper = { t: 0, target: game.hyperTarget, loaded: false };
@@ -540,6 +555,7 @@ function onKey(e) {
     return;
   }
   if (e.code === 'KeyM' && !game.menuOpen) return toggleMap(!game.mapOpen);
+  if (e.code === 'KeyH' && !game.menuOpen && (game.mapOpen || game.docked)) { IN.pressed.delete('KeyH'); return tryHyperjump(); }
   if (e.code === 'Enter' && !game.docked) { e.preventDefault(); releaseLock(); $('comms-input').focus(); return; }
 }
 function openMenuFn(tab) { game.menuOpen = true; releaseLock(); openMenu(tab); }
