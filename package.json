@@ -1,7 +1,7 @@
 {
-  "name": "neon-void",
-  "version": "1.0.0",
-  "description": "NEON//VOID - 사이버펑크 오픈월드 우주 MMO (브라우저 멀티플레이어)",
+  "name": "stardrift",
+  "version": "2.0.0",
+  "description": "STARDRIFT - 6자유도 3D 오픈월드 우주 샌드박스 (브라우저 멀티플레이어)",
   "type": "module",
   "main": "server/index.js",
   "scripts": {

@@ -1,4 +1,4 @@
-# Render Blueprint — NEON//VOID
+# Render Blueprint — STARDRIFT (서비스 이름은 기존 배포 유지를 위해 그대로 둡니다)
 # Render 대시보드 → New → Blueprint → 이 저장소 선택 으로 자동 배포됩니다.
 services:
   - type: web
@@ -12,9 +12,6 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
-      # 브라우저 계정 백업 서명 키 (자동 생성)
-      - key: SAVE_SECRET
-        generateValue: true
       # 영구 저장(추천): Neon 등 무료 PostgreSQL의 연결 문자열을 Render 대시보드에서 직접 입력하세요.
       - key: DATABASE_URL
         sync: false

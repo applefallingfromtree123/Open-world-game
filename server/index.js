@@ -1,12 +1,11 @@
-// NEON//VOID 서버 진입점 — HTTP 정적 파일 + WebSocket 게임 서버
+// STARDRIFT 서버 진입점 — HTTP 정적 파일 + WebSocket 허브
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
-import { Game } from './game.js';
+import { Hub } from './hub.js';
 import { Store } from './db.js';
-import { TICK_RATE } from '../public/shared/data.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -23,8 +22,7 @@ const BUILD = (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || Date.now().to
 
 const store = new Store();
 await store.init();
-const game = new Game(store);
-game.build = BUILD;
+const game = new Hub(store);
 try {
   await game.init();
 } catch (e) {
@@ -37,7 +35,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, build: BUILD, online: game.players.size, uptime: Math.round(process.uptime()) }));
+    return res.end(JSON.stringify({ ok: true, build: BUILD, online: game.online, uptime: Math.round(process.uptime()) }));
   }
   let p = decodeURIComponent(url.pathname);
   if (p === '/') p = '/index.html';
@@ -62,7 +60,7 @@ const server = http.createServer((req, res) => {
       return fs.readFile(file, 'utf8', (e, html) => {
         if (e) { res.writeHead(500); return res.end(); }
         res.writeHead(200, headers);
-        res.end(html.replace('js/main.js', `js/main.js?v=${BUILD}`).replace('css/style.css', `css/style.css?v=${BUILD}`).replace('%BUILD%', BUILD));
+        res.end(html.replace('js/main.js', `js/main.js?v=${BUILD}`).replace('css/style.css', `css/style.css?v=${BUILD}`).replaceAll('%BUILD%', BUILD));
       });
     }
     res.writeHead(200, headers);
@@ -86,21 +84,8 @@ setInterval(() => {
   }
 }, 25000);
 
-// 고정 틱 게임 루프
-const DT = 1 / TICK_RATE;
-let last = performance.now();
-let acc = 0;
-setInterval(() => {
-  const n = performance.now();
-  acc += Math.min(0.25, (n - last) / 1000);
-  last = n;
-  let steps = 0;
-  while (acc >= DT && steps < 5) {
-    try { game.tick(DT); } catch (e) { console.error('[tick] 오류', e); }
-    acc -= DT;
-    steps++;
-  }
-}, 1000 / TICK_RATE / 2);
+// 위치 중계 루프 (10Hz)
+setInterval(() => { try { game.tick(); } catch (e) { console.error('[tick] 오류', e); } }, 100);
 
 // 자동 저장
 setInterval(() => game.save(), 15000);
@@ -118,10 +103,11 @@ async function shutdown(sig) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[server] ${sig} 수신 — 저장 후 종료`);
+  game.dirty = true;
   await game.save();
   process.exit(0);
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-server.listen(PORT, () => console.log(`[server] NEON//VOID 실행 중 — http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`[server] STARDRIFT 실행 중 — http://localhost:${PORT}`));

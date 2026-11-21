@@ -1,245 +1,180 @@
-// 은하 지도 — 확대/이동, 목적지 선택, 오토파일럿
-import { G, send, serverTime } from './state.js';
-import { GALAXY_RADIUS, secColor, secLabel, fmtDist, STATION_TYPES } from '../shared/data.js';
-import { bodyPos } from '../shared/physics.js';
-import { esc, toast } from './ui.js';
-import { sfx } from './audio.js';
+// 은하 지도 — 3D 회전 투영, 경로 계획
+import * as THREE from 'three';
+import { FACTIONS, SEC_LEVELS } from './data.js';
+import { S } from './state.js';
+import { findRoute } from './universe.js';
+import { systemData } from './world.js';
+import { hexA, esc, fmtDist } from './util.js';
 
-const $ = (id) => document.getElementById(id);
-let cv, c, W, H, open = false;
-const view = { x: 0, y: 0, s: 0.001 };
-let sel = null;
-let drag = null;
-let hover = null;
+const M = { yaw: 0.4, pitch: 0.9, zoom: 13, sel: null, hover: null, cx: 0, cy: 0, drag: false, moved: 0, center: new THREE.Vector3(), tab: 'galaxy' };
+let cv, x, game, side;
 
-function known(sysId) { return G.acct?.discovered?.includes(sysId); }
-
-export function isMapOpen() { return open; }
+export function initMap(g) {
+  game = g;
+  cv = document.getElementById('map-canvas');
+  x = cv.getContext('2d');
+  side = document.getElementById('map-side');
+  let lx = 0, ly = 0;
+  cv.addEventListener('mousedown', (e) => { M.drag = true; M.moved = 0; lx = e.clientX; ly = e.clientY; });
+  window.addEventListener('mouseup', (e) => {
+    if (!M.drag) return; M.drag = false;
+    if (M.moved < 5 && game.mapOpen) { M.sel = M.hover; renderSide(); }
+  });
+  cv.addEventListener('mousemove', (e) => {
+    if (M.drag) { M.yaw -= (e.clientX - lx) * 0.006; M.pitch = Math.max(0.1, Math.min(1.5, M.pitch + (e.clientY - ly) * 0.005)); M.moved += Math.abs(e.clientX - lx) + Math.abs(e.clientY - ly); lx = e.clientX; ly = e.clientY; }
+    M.mx = e.clientX; M.my = e.clientY;
+  });
+  cv.addEventListener('dblclick', () => { if (M.hover) { M.sel = M.hover; plot(M.sel.id); } });
+  cv.addEventListener('wheel', (e) => { M.zoom = Math.max(2.5, Math.min(30, M.zoom * (1 - Math.sign(e.deltaY) * 0.1))); e.preventDefault(); }, { passive: false });
+  document.querySelectorAll('#map-tabs button').forEach((b) => b.addEventListener('click', () => { M.tab = b.dataset.tab; document.querySelectorAll('#map-tabs button').forEach((o) => o.classList.toggle('active', o === b)); renderSide(); }));
+}
 export function openMap() {
-  if (!G.world) return;
-  open = true;
-  $('map').classList.remove('hidden');
-  cv = $('map-canvas'); c = cv.getContext('2d');
-  fit();
-  if (!sel) { view.x = G.self.x; view.y = G.self.y; view.s = G.self && G.me?.sys ? 0.006 : Math.min(W, H) / (GALAXY_RADIUS * 2.3); }
-  sfx.click();
-  loop();
+  const cur = game.galaxy.byId[game.world.sys.id];
+  M.center.copy(cur.pos);
+  M.sel = M.sel || cur;
+  renderSide();
 }
-export function closeMap() { open = false; $('map').classList.add('hidden'); }
-
-function fit() { const d = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * d; cv.height = H * d; c.setTransform(d, 0, 0, d, 0, 0); }
-const mx = (x) => (x - view.x) * view.s + W / 2;
-const my = (y) => (y - view.y) * view.s + H / 2;
-const toWorld = (px, py) => ({ x: (px - W / 2) / view.s + view.x, y: (py - H / 2) / view.s + view.y });
-
-function objectsAt(px, py) {
-  const T = serverTime();
-  const hits = [];
-  const test = (x, y, r, o) => { const d = Math.hypot(mx(x) - px, my(y) - py); if (d < r) hits.push({ d, ...o }); };
-  for (const s of G.world.systems) {
-    test(s.x, s.y, Math.max(12, s.starR * view.s * 1.5), { kind: 'system', id: s.id });
-    if (view.s > 0.002 && known(s.id)) {
-      for (const id of s.stations) { const p = bodyPos(G.bodies[id], G.bodies, T); test(p.x, p.y, 12, { kind: 'station', id }); }
-      for (const id of s.planets) { const p = bodyPos(G.bodies[id], G.bodies, T); test(p.x, p.y, Math.max(8, G.bodies[id].r * view.s), { kind: 'planet', id }); }
-      for (const id of s.belts) { const b = G.beltById[id]; test(b.x, b.y, 12, { kind: 'belt', id }); }
-      if (s.beacon) { const b = G.beaconById[s.beacon]; test(b.x, b.y, 12, { kind: 'beacon', id: b.id }); }
-    }
+function proj(p) {
+  const dx = p.x - M.center.x, dy = p.y - M.center.y, dz = p.z - M.center.z;
+  const cy = Math.cos(M.yaw), sy = Math.sin(M.yaw);
+  const x1 = dx * cy - dz * sy, z1 = dx * sy + dz * cy;
+  const cp = Math.cos(M.pitch), sp = Math.sin(M.pitch);
+  const y2 = dy * cp - z1 * sp, z2 = dy * sp + z1 * cp;
+  const persp = 600 / (600 + z2 * M.zoom * 0.6);
+  return { x: M.cx + x1 * M.zoom * persp, y: M.cy - y2 * M.zoom * persp, z: z2, s: persp };
+}
+export function drawMap(dt) {
+  const W = window.innerWidth, H = window.innerHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px'; }
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  M.cx = (W - 340) / 2; M.cy = H / 2;
+  if (!M.drag) M.yaw += dt * 0.02;
+  const g = x.createRadialGradient(M.cx, M.cy, 0, M.cx, M.cy, Math.max(W, H) * 0.7);
+  g.addColorStop(0, '#0b1020'); g.addColorStop(1, '#020308');
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  const gal = game.galaxy;
+  const curId = game.world.sys.id;
+  const range = game.playerShip ? game.playerShip.stats.jump : 9;
+  // 은하면 격자
+  x.strokeStyle = 'rgba(92,225,255,0.06)'; x.lineWidth = 1;
+  for (let r = 10; r <= 70; r += 10) {
+    x.beginPath();
+    for (let a = 0; a <= 64; a++) { const t = a / 64 * Math.PI * 2; const p = proj({ x: Math.cos(t) * r, y: 0, z: Math.sin(t) * r }); a ? x.lineTo(p.x, p.y) : x.moveTo(p.x, p.y); }
+    x.stroke();
   }
-  for (const an of G.anomalies.values()) test(an.x, an.y, 10, { kind: 'anomaly', id: an.id });
-  hits.sort((a, b) => a.d - b.d);
-  // 시스템보다 세부 오브젝트 우선
-  const detail = hits.find((h) => h.kind !== 'system' && h.d < 14);
-  return detail || hits[0] || null;
-}
-
-function loop() {
-  if (!open) return;
-  draw();
-  requestAnimationFrame(loop);
-}
-
-function draw() {
-  const t = performance.now() / 1000, T = serverTime();
-  c.fillStyle = '#030008'; c.fillRect(0, 0, W, H);
-  // 은하 원판
-  const gx = mx(0), gy = my(0), gr = GALAXY_RADIUS * view.s;
-  const g = c.createRadialGradient(gx, gy, 0, gx, gy, gr * 1.1);
-  g.addColorStop(0, 'rgba(120,40,200,0.18)'); g.addColorStop(0.5, 'rgba(0,120,200,0.06)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-  c.fillStyle = g; c.beginPath(); c.arc(gx, gy, gr * 1.1, 0, Math.PI * 2); c.fill();
-  c.strokeStyle = 'rgba(255,43,214,0.12)'; c.lineWidth = 1;
-  for (let r = 100000; r <= GALAXY_RADIUS * 1.15; r += 100000) { c.beginPath(); c.arc(gx, gy, r * view.s, 0, Math.PI * 2); c.stroke(); }
-  c.strokeStyle = 'rgba(255,34,85,0.35)'; c.setLineDash([8, 8]);
-  c.beginPath(); c.arc(gx, gy, GALAXY_RADIUS * 1.15 * view.s, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
-
+  const P = new Map(gal.systems.map((s) => [s.id, proj(s.pos)]));
+  // 항로 (도약 가능 범위)
+  for (const s of gal.systems) for (const n of s.links) {
+    if (n < s.id) continue;
+    const o = gal.byId[n];
+    if (s.pos.distanceTo(o.pos) > range) continue;
+    const a = P.get(s.id), b = P.get(n);
+    x.strokeStyle = 'rgba(120,160,220,0.14)';
+    x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke();
+  }
+  // 도약 범위 원
+  const cp = P.get(curId);
+  x.strokeStyle = 'rgba(125,255,154,0.35)'; x.setLineDash([4, 6]);
+  x.beginPath(); x.arc(cp.x, cp.y, range * M.zoom * cp.s, 0, 7); x.stroke(); x.setLineDash([]);
+  // 경로
+  const route = S.save.route || [];
+  if (route.length) {
+    x.strokeStyle = '#ffd84d'; x.lineWidth = 2.5;
+    x.beginPath(); x.moveTo(cp.x, cp.y);
+    for (const id of route) { const p = P.get(id); x.lineTo(p.x, p.y); }
+    x.stroke(); x.lineWidth = 1;
+  }
   // 성계
-  for (const s of G.world.systems) {
-    const X = mx(s.x), Y = my(s.y);
-    if (X < -300 || X > W + 300 || Y < -300 || Y > H + 300) continue;
-    const kn = known(s.id);
-    const sov = s.beacon && G.info.sov[s.beacon];
-    const owner = sov && sov.owner && G.info.clans[sov.owner];
-    // 영향권
-    c.strokeStyle = hexA(secColor(s.sec), 0.25); c.lineWidth = 1;
-    c.beginPath(); c.arc(X, Y, 70000 * view.s, 0, Math.PI * 2); c.stroke();
-    if (owner) { c.fillStyle = hexA(owner.color, 0.08); c.fill(); }
-    if (view.s > 0.002 && kn) {
-      c.strokeStyle = 'rgba(0,240,255,0.1)';
-      for (const pid of s.planets) { c.beginPath(); c.arc(X, Y, G.bodies[pid].orbitR * view.s, 0, Math.PI * 2); c.stroke(); }
-      for (const pid of s.planets) {
-        const p = G.bodies[pid], pos = bodyPos(p, G.bodies, T);
-        c.fillStyle = p.c1; c.beginPath(); c.arc(mx(pos.x), my(pos.y), Math.max(3, p.r * view.s), 0, Math.PI * 2); c.fill();
-        if (view.s > 0.006) label(p.name, mx(pos.x), my(pos.y) + Math.max(3, p.r * view.s) + 12, 'rgba(200,220,255,.6)', 11);
-      }
-      for (const sid of s.stations) {
-        const st = G.bodies[sid], pos = bodyPos(st, G.bodies, T);
-        const x = mx(pos.x), y = my(pos.y);
-        c.fillStyle = st.type === 'pirate' ? '#ff2255' : '#ffe600';
-        c.save(); c.translate(x, y); c.rotate(Math.PI / 4); c.fillRect(-5, -5, 10, 10); c.restore();
-        label(`${STATION_TYPES[st.type].icon} ${st.name}`, x, y - 10, st.type === 'pirate' ? '#ff5577' : '#ffe600', 11);
-      }
-      for (const bid of s.belts) { const b = G.beltById[bid]; c.strokeStyle = 'rgba(180,180,200,0.5)'; c.setLineDash([2, 3]); c.beginPath(); c.arc(mx(b.x), my(b.y), Math.max(5, b.r * view.s), 0, Math.PI * 2); c.stroke(); c.setLineDash([]); label('⛏ 소행성대', mx(b.x), my(b.y) + Math.max(5, b.r * view.s) + 12, 'rgba(200,200,220,.7)', 10); }
-      if (s.beacon) {
-        const b = G.beaconById[s.beacon];
-        const col = owner ? owner.color : '#fff';
-        c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); c.arc(mx(b.x), my(b.y), 7, 0, Math.PI * 2); c.stroke();
-        label(`⚑ ${sov?.owner ? '[' + sov.owner + ']' : '무주지'}${sov?.prog && sov.prog < 100 ? ` ${Math.round(sov.prog)}%` : ''}`, mx(b.x), my(b.y) + 20, col, 11);
-      }
-    }
-    // 항성
-    const R = Math.max(5, s.starR * view.s);
-    const sg = c.createRadialGradient(X, Y, 0, X, Y, R * 3);
-    sg.addColorStop(0, kn ? s.starColor : '#666'); sg.addColorStop(0.3, hexA(kn ? s.starColor : '#666666', 0.4)); sg.addColorStop(1, 'rgba(0,0,0,0)');
-    c.fillStyle = sg; c.beginPath(); c.arc(X, Y, R * 3, 0, Math.PI * 2); c.fill();
-    c.fillStyle = kn ? '#fff' : '#888'; c.beginPath(); c.arc(X, Y, R * 0.5, 0, Math.PI * 2); c.fill();
-    const nm = kn ? s.name : '??? 미탐사 성계';
-    label(nm, X, Y - R * 1.5 - 14, kn ? '#fff' : '#889', 14, true);
-    label(`${secLabel(s.sec)} ${s.sec.toFixed(1)}${owner ? ` · [${sov.owner}]` : ''}`, X, Y - R * 1.5 + 2, secColor(s.sec), 11);
-    if (sel && sel.kind === 'system' && sel.id === s.id) { c.strokeStyle = '#ff2bd6'; c.lineWidth = 2; c.beginPath(); c.arc(X, Y, R * 2 + 8 + Math.sin(t * 4) * 2, 0, Math.PI * 2); c.stroke(); }
+  M.hover = null;
+  let hd = 14;
+  const sorted = gal.systems.slice().sort((a, b) => P.get(b.id).z - P.get(a.id).z);
+  for (const s of sorted) {
+    const p = P.get(s.id);
+    const col = FACTIONS[s.faction].color;
+    const r = (s.capital ? 6 : 4) * p.s;
+    // 높이 막대
+    const base = proj({ x: s.pos.x, y: 0, z: s.pos.z });
+    x.strokeStyle = hexA(col, 0.25); x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(base.x, base.y); x.stroke();
+    const sg = x.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 4);
+    sg.addColorStop(0, hexA(s.star.color, 0.9)); sg.addColorStop(1, hexA(s.star.color, 0));
+    x.fillStyle = sg; x.beginPath(); x.arc(p.x, p.y, r * 4, 0, 7); x.fill();
+    x.fillStyle = col; x.beginPath(); x.arc(p.x, p.y, r, 0, 7); x.fill();
+    if (s.id === curId) { x.strokeStyle = '#ffffff'; x.lineWidth = 2; x.beginPath(); x.arc(p.x, p.y, r + 6, 0, 7); x.stroke(); x.lineWidth = 1; }
+    if (M.sel && M.sel.id === s.id) { x.strokeStyle = '#ffd84d'; x.lineWidth = 2; x.strokeRect(p.x - r - 9, p.y - r - 9, (r + 9) * 2, (r + 9) * 2); x.lineWidth = 1; }
+    const known = S.save.visited[s.id];
+    x.font = `${s.id === curId ? 700 : 500} ${s.capital ? 13 : 11}px Rajdhani, 'Noto Sans KR', sans-serif`;
+    x.fillStyle = known ? '#e6f3ff' : 'rgba(200,215,235,0.55)';
+    x.textAlign = 'left';
+    x.fillText(s.name + (s.capital ? ' ★' : ''), p.x + r + 6, p.y + 4);
+    const d = Math.hypot((M.mx || -99) - p.x, (M.my || -99) - p.y);
+    if (d < hd) { hd = d; M.hover = s; }
   }
-  // 이상 신호
-  for (const an of G.anomalies.values()) {
-    const X = mx(an.x), Y = my(an.y);
-    c.fillStyle = '#c070ff'; c.beginPath(); c.moveTo(X, Y - 6); c.lineTo(X + 6, Y); c.lineTo(X, Y + 6); c.lineTo(X - 6, Y); c.fill();
-    if (view.s > 0.003) label(an.name, X, Y + 16, '#c070ff', 10);
+  // 범례
+  x.font = '600 12px Rajdhani, sans-serif'; x.textAlign = 'left';
+  let ly = H - 110;
+  for (const f of ['union', 'free', 'syndicate', 'pirate', 'indep']) {
+    x.fillStyle = FACTIONS[f].color; x.fillRect(20, ly - 9, 10, 10);
+    x.fillStyle = '#cfe6f5'; x.fillText(FACTIONS[f].name, 36, ly); ly += 18;
   }
-  // 오토파일럿 경로
-  const me = G.me;
-  if (me?.ap) {
-    let x = me.ap.x, y = me.ap.y;
-    if (me.ap.kind === 'station' || me.ap.kind === 'planet') { const p = bodyPos(G.bodies[me.ap.id], G.bodies, T); x = p.x; y = p.y; }
-    c.strokeStyle = '#ffe600'; c.lineWidth = 2; c.setLineDash([10, 6]); c.lineDashOffset = -t * 30;
-    c.beginPath(); c.moveTo(mx(G.self.x), my(G.self.y)); c.lineTo(mx(x), my(y)); c.stroke(); c.setLineDash([]);
-    c.beginPath(); c.arc(mx(x), my(y), 9, 0, Math.PI * 2); c.stroke();
-  }
-  // 나
-  const X = mx(G.self.x), Y = my(G.self.y);
-  c.save(); c.translate(X, Y); c.rotate(G.self.a);
-  c.fillStyle = '#00f0ff'; c.shadowColor = '#00f0ff'; c.shadowBlur = 12;
-  c.beginPath(); c.moveTo(11, 0); c.lineTo(-7, 6); c.lineTo(-4, 0); c.lineTo(-7, -6); c.closePath(); c.fill();
-  c.restore();
-  c.strokeStyle = `rgba(0,240,255,${0.5 + Math.sin(t * 3) * 0.3})`; c.beginPath(); c.arc(X, Y, 16 + ((t * 20) % 20), 0, Math.PI * 2); c.stroke();
-  label('나', X, Y + 26, '#00f0ff', 11, true);
-  if (hover) { c.strokeStyle = 'rgba(255,255,255,.5)'; c.beginPath(); c.arc(hover.px, hover.py, 16, 0, Math.PI * 2); c.stroke(); }
-  if (sel && sel.kind === 'point') { c.strokeStyle = '#ff2bd6'; c.beginPath(); c.moveTo(mx(sel.x) - 8, my(sel.y)); c.lineTo(mx(sel.x) + 8, my(sel.y)); c.moveTo(mx(sel.x), my(sel.y) - 8); c.lineTo(mx(sel.x), my(sel.y) + 8); c.stroke(); }
-  // 축척
-  const scaleLen = niceScale(120 / view.s);
-  c.strokeStyle = '#fff'; c.lineWidth = 1;
-  c.beginPath(); c.moveTo(20, H - 30); c.lineTo(20 + scaleLen * view.s, H - 30); c.stroke();
-  label(fmtDist(scaleLen), 20 + (scaleLen * view.s) / 2, H - 38, '#fff', 11);
 }
-function niceScale(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n < 2 ? 1 : n < 5 ? 2 : 5) * p; }
-function label(text, x, y, color, size, bold) {
-  c.font = `${bold ? 700 : 400} ${size}px 'Noto Sans KR', sans-serif`; c.textAlign = 'center';
-  c.fillStyle = 'rgba(0,0,0,.7)'; c.fillText(text, x + 1, y + 1); c.fillStyle = color; c.fillText(text, x, y);
-}
-function hexA(hex, a) { const n = parseInt(hex.slice(1, 7), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
 
-// ---------- 사이드 패널 ----------
-function showSide() {
-  const side = $('map-side');
-  if (!sel) { side.classList.add('hidden'); return; }
-  side.classList.remove('hidden');
-  const T = serverTime();
-  const dist = (x, y) => fmtDist(Math.hypot(x - G.self.x, y - G.self.y));
-  const go = (kind, id, text = '이동') => `<button class="btn small primary" data-map-go="${kind}" data-id="${esc(id)}">${text}</button>`;
-  let html = '';
-  if (sel.kind === 'system') {
-    const s = G.sysById[sel.id];
-    const kn = known(s.id);
-    const sov = s.beacon && G.info.sov[s.beacon];
-    html = `<h3 style="color:${kn ? '#fff' : '#889'}">${kn ? esc(s.name) : '??? 미탐사 성계'}</h3>
-      <div style="color:${secColor(s.sec)}">${secLabel(s.sec)} ${s.sec.toFixed(1)}</div>
-      <div class="dim" style="margin:4px 0 10px">거리 ${dist(s.x, s.y)}${sov ? ` · 주권: ${sov.owner ? `[${esc(sov.owner)}]` : '무주지'}` : ''}</div>
-      ${go('system', s.id, '▶ 성계로 오토파일럿')}`;
-    if (kn) {
-      html += `<div class="section-title">스테이션</div>${s.stations.map((id) => { const st = G.bodies[id]; const p = bodyPos(st, G.bodies, T); return `<div class="obj"><span>${STATION_TYPES[st.type].icon} ${esc(st.name)}<br><span class="dim" style="font-size:11px">${STATION_TYPES[st.type].name} · ${dist(p.x, p.y)}</span></span>${go('station', id, '도킹')}</div>`; }).join('')}`;
-      html += `<div class="section-title">소행성대</div>${s.belts.map((id) => { const b = G.beltById[id]; return `<div class="obj"><span>⛏ ${esc(b.name)}<br><span class="dim" style="font-size:11px">${dist(b.x, b.y)}</span></span>${go('belt', id)}</div>`; }).join('') || '<div class="dim">없음</div>'}`;
-      if (s.beacon) { const b = G.beaconById[s.beacon]; html += `<div class="section-title">주권</div><div class="obj"><span>⚑ ${esc(b.name)}</span>${go('beacon', b.id)}</div>`; }
-      html += `<div class="section-title">행성</div>${s.planets.map((id) => `<div class="obj"><span>● ${esc(G.bodies[id].name)}</span>${go('planet', id)}</div>`).join('')}`;
-    } else html += '<p class="dim" style="font-size:12px;margin-top:10px">직접 방문해서 탐사하면 스테이션과 소행성대 정보가 공개되고 발견 보너스를 받습니다.</p>';
-  } else if (sel.kind === 'point') {
-    html = `<h3>지정 좌표</h3><div class="dim" style="margin-bottom:10px">거리 ${dist(sel.x, sel.y)}<br>딥 스페이스 — 이상 신호를 찾으려면 도착 후 R로 스캔하세요.</div><button class="btn small primary" data-map-go="point">▶ 이 좌표로 이동</button>`;
-  } else {
-    const names = { station: () => G.bodies[sel.id].name, planet: () => G.bodies[sel.id].name, belt: () => G.beltById[sel.id].name, beacon: () => G.beaconById[sel.id].name, anomaly: () => G.anomalies.get(sel.id)?.name || '신호' };
-    html = `<h3>${esc(names[sel.kind]())}</h3>${go(sel.kind, sel.id, '▶ 오토파일럿')}`;
+function plot(id) {
+  const range = game.playerShip.stats.jump;
+  const r = findRoute(game.galaxy, game.world.sys.id, id, range);
+  if (!r) { game.msg(`도약 범위(${range.toFixed(1)} ly)로는 도달할 수 없습니다`, 'warn'); return; }
+  S.save.route = r;
+  game.msg(r.length ? `경로 설정: ${r.length}회 도약 — H키로 하이퍼점프` : '현재 성계입니다', 'info');
+  renderSide();
+}
+
+function renderSide() {
+  if (!side) return;
+  if (M.tab === 'system') return renderSystem();
+  const s = M.sel;
+  if (!s) { side.innerHTML = '<div class="dim">성계를 선택하세요</div>'; return; }
+  const gal = game.galaxy;
+  const cur = gal.byId[game.world.sys.id];
+  const dist = s.pos.distanceTo(cur.pos);
+  const known = S.save.visited[s.id];
+  const sd = systemData(s);
+  const sec = SEC_LEVELS[s.sec];
+  const route = findRoute(gal, cur.id, s.id, game.playerShip.stats.jump);
+  const fac = FACTIONS[s.faction];
+  let html = `<div class="ms-name">${esc(s.name)}${s.capital ? ' <span class="cap">수도</span>' : ''}</div>
+    <div class="ms-row"><span>세력</span><b style="color:${fac.color}">${fac.name}</b></div>
+    <div class="ms-row"><span>보안</span><b style="color:${sec.color}">${sec.name}</b></div>
+    <div class="ms-row"><span>항성</span><b>${s.star.cls}형 · ${s.star.name}</b></div>
+    <div class="ms-row"><span>거리</span><b>${dist.toFixed(1)} ly</b></div>
+    <div class="ms-row"><span>도약</span><b>${route ? route.length + '회' : '도달 불가'}</b></div>
+    <div class="ms-row"><span>천체</span><b>행성 ${sd.planets.length} · 소행성대 ${sd.fields.length}</b></div>`;
+  html += `<div class="ms-sub">스테이션 ${known ? '' : '<span class="dim">(미방문 — 추정 정보)</span>'}</div>`;
+  for (const st of sd.stations) html += `<div class="ms-st"><span style="color:${FACTIONS[st.faction].color}">■</span> ${esc(st.name)} <span class="dim">${st.typeName}</span></div>`;
+  const disc = S.save.discovered[s.id];
+  if (game.discoveries && game.discoveries[s.id]) html += `<div class="ms-sub">최초 발견자: <b>${esc(game.discoveries[s.id])}</b></div>`;
+  else if (disc) html += `<div class="ms-sub">최초 발견자: <b>당신</b></div>`;
+  html += `<div class="ms-desc dim">${fac.desc}</div><div class="ms-btns">`;
+  if (s.id !== cur.id) html += `<button class="btn primary" id="ms-plot">경로 설정</button>`;
+  if ((S.save.route || []).length) html += `<button class="btn" id="ms-clear">경로 해제</button>`;
+  html += '</div>';
+  side.innerHTML = html;
+  const b = document.getElementById('ms-plot'); if (b) b.onclick = () => plot(s.id);
+  const c = document.getElementById('ms-clear'); if (c) c.onclick = () => { S.save.route = []; renderSide(); };
+}
+
+function renderSystem() {
+  const w = game.world, P = game.playerShip;
+  const items = w.nav.slice().sort((a, b) => a.pos.distanceTo(P.pos) - b.pos.distanceTo(P.pos));
+  let html = `<div class="ms-name">${esc(w.sys.name)} 성계</div><div class="dim" style="margin-bottom:8px">클릭하면 항법 목표로 설정됩니다</div>`;
+  for (const n of items) {
+    const d = n.pos.distanceTo(P.pos);
+    const icon = { star: '☀', planet: '●', moon: '◦', station: '■', outpost: '⌂', field: '⁂', anomaly: '◆' }[n.kind] || '·';
+    const ex = S.save.explored[n.id] ? ' <span class="good">✓탐사</span>' : '';
+    html += `<div class="ms-item" data-id="${n.id}"><span class="ic">${icon}</span><div><b>${esc(n.name)}</b>${ex}<div class="dim">${esc(n.sub || '')}</div></div><span class="d">${fmtDist(d)}</span></div>`;
   }
   side.innerHTML = html;
+  side.querySelectorAll('.ms-item').forEach((el) => el.addEventListener('click', () => {
+    const n = w.nav.find((o) => o.id === el.dataset.id);
+    if (n) { P.target = n; game.msg(`항법 목표: ${n.name}`, 'info'); }
+  }));
 }
-
-function goTo(kind, id) {
-  if (kind === 'point') send({ t: 'ap', kind: 'point', x: sel.x, y: sel.y });
-  else send({ t: 'ap', kind, id });
-  sfx.click();
-  closeMap();
-}
-
-// ---------- 입력 ----------
-window.addEventListener('DOMContentLoaded', () => {});
-{
-  const el = () => $('map-canvas');
-  const init = () => {
-    const canvas = el();
-    canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const before = toWorld(e.clientX, e.clientY);
-      view.s = Math.max(0.00025, Math.min(0.08, view.s * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
-      const after = toWorld(e.clientX, e.clientY);
-      view.x += before.x - after.x; view.y += before.y - after.y;
-    }, { passive: false });
-    canvas.addEventListener('mousedown', (e) => { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false }; });
-    window.addEventListener('mousemove', (e) => {
-      if (!open) return;
-      if (drag) {
-        const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-        if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
-        view.x = drag.vx - dx / view.s; view.y = drag.vy - dy / view.s;
-      } else {
-        const o = objectsAt(e.clientX, e.clientY);
-        hover = o && o.d < 20 ? { px: e.clientX, py: e.clientY } : null;
-      }
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (!open || !drag) return;
-      const moved = drag.moved; drag = null;
-      if (moved || e.target !== canvas) return;
-      const o = objectsAt(e.clientX, e.clientY);
-      if (o && o.d < 24) sel = { kind: o.kind, id: o.id };
-      else { const w = toWorld(e.clientX, e.clientY); sel = { kind: 'point', x: w.x, y: w.y }; }
-      showSide();
-    });
-    canvas.addEventListener('dblclick', (e) => {
-      const o = objectsAt(e.clientX, e.clientY);
-      if (o && o.d < 24) goTo(o.kind, o.id);
-      else { const w = toWorld(e.clientX, e.clientY); sel = { kind: 'point', x: w.x, y: w.y }; goTo('point'); }
-    });
-    $('map-side').addEventListener('click', (e) => { const b = e.target.closest('[data-map-go]'); if (b) goTo(b.dataset.mapGo, b.dataset.id); });
-    $('btn-map-close').addEventListener('click', closeMap);
-    $('btn-map-me').addEventListener('click', () => { view.x = G.self.x; view.y = G.self.y; });
-    window.addEventListener('resize', () => { if (open) fit(); });
-    // 터치: 핀치 없이 드래그만
-    canvas.addEventListener('touchstart', (e) => { const t = e.touches[0]; drag = { x: t.clientX, y: t.clientY, vx: view.x, vy: view.y, moved: false }; }, { passive: true });
-    canvas.addEventListener('touchmove', (e) => { if (!drag) return; const t = e.touches[0]; view.x = drag.vx - (t.clientX - drag.x) / view.s; view.y = drag.vy - (t.clientY - drag.y) / view.s; drag.moved = true; }, { passive: true });
-  };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-}
-void toast;
+export { renderSide };
