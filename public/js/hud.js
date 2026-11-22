@@ -279,11 +279,12 @@ function drawCenter(g, C) {
   const lines = [];
   const P = g.playerShip;
   if (P.cruise === 1) lines.push([`크루즈 드라이브 충전 ${Math.min(100, Math.round(P.cruiseCharge / 3 * 100))}%`, '#9fc8ff']);
-  if (g.hyperCharge > 0) lines.push([`하이퍼점프 충전 ${Math.round(g.hyperCharge / 4 * 100)}% → ${g.hyperTarget ? g.galaxy.byId[g.hyperTarget].name : ''}`, '#c8a0ff']);
+  if (g.hyperCharge > 0 && g.jumpHint) lines.push([g.jumpHint, '#ffb347']);
+  else if (g.hyperCharge > 0) lines.push([`하이퍼점프 충전 ${Math.round(g.hyperCharge / 4 * 100)}% → ${g.hyperTarget ? g.galaxy.byId[g.hyperTarget].name : ''}`, '#c8a0ff']);
   if (g.autopilot) lines.push([g.autopilot.label, '#7dff9a']);
   if (HUD.scan > 0) lines.push([`스캔 중 ${Math.round(HUD.scan * 100)}%`, '#ffd84d']);
   if (g.hint) lines.push([g.hint, C]);
-  let y = document.body.classList.contains('mobile') ? 128 : 110;
+  let y = document.body.classList.contains('mobile') ? 128 : Math.max(170, H * 0.26);
   for (const [t, c] of lines) { text(t, W / 2, y, c, 15, 'center'); y += 22; }
   if (HUD.scan > 0) { x.fillStyle = 'rgba(0,0,0,0.5)'; x.fillRect(W / 2 - 100, y - 10, 200, 6); x.fillStyle = '#ffd84d'; x.fillRect(W / 2 - 100, y - 10, 200 * HUD.scan, 6); }
 }

@@ -100,7 +100,7 @@ export function initTouch(g) {
     pk.style.transform = `translate(${dx}px, ${dy}px)`;
     const f = (v) => (Math.abs(v) < 0.18 ? 0 : v);
     IN.sx = f(dx / PR); IN.sy = f(-dy / PR);
-    if ((IN.sx || IN.sy) && game.autopilot) game.autopilot = null;
+    if (IN.sx || IN.sy) game.manualOverride();
   };
   pad.addEventListener('pointerdown', (e) => { if (pid !== null) return; e.preventDefault(); pid = e.pointerId; pad.setPointerCapture(pid); pad.classList.add('on'); padMove(e); });
   pad.addEventListener('pointermove', (e) => { if (e.pointerId === pid) padMove(e); });
@@ -115,7 +115,7 @@ export function initTouch(g) {
     let v = -0.5 + t * 1.5;
     if (Math.abs(v) < 0.06) v = 0;                           // 0 근처 스냅
     const P = game.playerShip;
-    if (P) { P.ctrl.throttle = Math.max(P.cruise ? 0.05 : -0.5, Math.min(1, v)); if (game.autopilot) game.autopilot = null; }
+    if (P) { P.ctrl.throttle = Math.max(P.cruise ? 0.05 : -0.5, Math.min(1, v)); game.manualOverride(); }
   };
   thr.addEventListener('pointerdown', (e) => { e.preventDefault(); tid = e.pointerId; thr.setPointerCapture(tid); setThr(e); });
   thr.addEventListener('pointermove', (e) => { if (e.pointerId === tid) setThr(e); });
@@ -130,7 +130,15 @@ export function initTouch(g) {
   hold(root.querySelector('[data-b="rollR"]'), keyOn('KeyE'), keyOff('KeyE'));
   hold(root.querySelector('[data-b="scan"]'), keyOn('KeyV'), keyOff('KeyV'));
   for (const [b, code] of [['cruise', 'KeyJ'], ['auto', 'KeyG'], ['target', 'KeyT'], ['hostile', 'KeyY'], ['cam', 'KeyC'], ['fa', 'KeyZ'], ['stop', 'KeyX']]) tap(root.querySelector(`[data-b="${b}"]`), () => press(code));
-  tap(root.querySelector('[data-b="jump"]'), () => game.tryHyperjump());
+  // 점프: 탭 = 점프/상태 확인, 0.8초 길게 누르기 = 취소
+  {
+    const jb = root.querySelector('[data-b="jump"]');
+    let jt = null, longp = false;
+    jb.addEventListener('pointerdown', (e) => { e.preventDefault(); jb.classList.add('on'); longp = false; jt = setTimeout(() => { longp = true; game.cancelJump(); }, 800); });
+    const jup = () => { jb.classList.remove('on'); clearTimeout(jt); if (jt !== null && !longp) game.tryHyperjump(); jt = null; };
+    jb.addEventListener('pointerup', jup);
+    jb.addEventListener('pointercancel', () => { jb.classList.remove('on'); clearTimeout(jt); jt = null; });
+  }
   root.querySelector('[data-b="chat"]').addEventListener('click', () => openChat());
   tap(root.querySelector('[data-b="build"]'), () => press('KeyB'));
   // 스크롤/확대 방지

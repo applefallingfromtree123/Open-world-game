@@ -10,6 +10,7 @@ import { fmtCr, fmtDist, fmtTime, esc, hexA } from './util.js';
 import { showShip, HG } from './hangar.js';
 import { sfx, setVolumes } from './audio.js';
 import { missionLine } from './missions.js';
+import { CHAPTERS } from './tutorial.js';
 
 const $ = (id) => document.getElementById(id);
 let game;
@@ -548,7 +549,7 @@ function menuTab(tab) {
   document.querySelectorAll('#menu-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   const body = $('menu-body');
   body.innerHTML = '';
-  ({ pilot: mPilot, cargo: mCargo, missions: mMissions, factions: mFactions, ranking: mRanking, settings: mSettings, help: mHelp })[tab](body);
+  ({ pilot: mPilot, cargo: mCargo, missions: mMissions, factions: mFactions, ranking: mRanking, settings: mSettings, help: mHelp, tutorial: mTutorial })[tab](body);
 }
 function mPilot(body) {
   const s = S.save, st = s.stats, rk = rankOf();
@@ -615,8 +616,17 @@ function mRanking(body) {
     body.appendChild(tbl);
   });
 }
+function mTutorial(body) {
+  body.appendChild(el('div', 'hint', '완전 초보자를 위한 안내입니다. 원하는 장을 누르면 열리고, 🔊 읽어주기로 음성 안내를 들을 수 있습니다.'));
+  CHAPTERS.forEach((c, i) => {
+    const r = el('div', 'slot', `<b>${c.t}</b>`);
+    r.appendChild(btn('열기', 'small primary', () => game.openTutorial(i)));
+    body.appendChild(r);
+  });
+}
 function mSettings(body) {
   const st = S.save.settings;
+  { const r = el('div', 'slot', '<b>📖 초보자 튜토리얼</b><span class="dim">조작법 · 돈 버는 법 · 세력 · 범죄 · 점프 · 전투 · 기지 (음성 읽어주기 지원)</span>'); r.appendChild(btn('열기', 'small primary', () => game.openTutorial(0))); body.appendChild(r); }
   const row = (label, input) => { const r = el('div', 'slot', `<b>${label}</b>`); r.appendChild(input); body.appendChild(r); };
   const range = (val, min, max, step, on) => { const i = el('input'); i.type = 'range'; i.min = min; i.max = max; i.step = step; i.value = val; i.oninput = () => on(+i.value); return i; };
   const select = (val, opts, on) => { const s = el('select'); s.innerHTML = opts.map(([v, l]) => `<option value="${v}"${v === val ? ' selected' : ''}>${l}</option>`).join(''); s.onchange = () => on(s.value); return s; };

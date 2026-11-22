@@ -343,3 +343,26 @@ body.mobile .tagline { margin-bottom: 10px; font-size: 14px; }
 body.mobile #login-form { gap: 8px; }
 body.mobile #login-form input { padding: 8px 10px; font-size: 16px; }
 body.mobile #death .big-red { font-size: 30px; }
+
+/* ---------- 튜토리얼 ---------- */
+.flex { display: flex; gap: 8px; align-items: center; }
+#tutorial { z-index: 70; width: min(980px, 96vw); height: min(680px, 94vh); }
+.tu-wrap { flex: 1; display: flex; min-height: 0; border-top: 1px solid var(--line); }
+.tu-list { width: 220px; overflow-y: auto; border-right: 1px solid var(--line); padding: 6px; flex-shrink: 0; }
+.tu-list button { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--dim); font-family: var(--ui); font-weight: 700; font-size: 14px; padding: 8px 10px; border-radius: 4px; cursor: pointer; }
+.tu-list button:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.tu-list button.active { color: var(--hud); background: rgba(92,225,255,0.1); }
+.tu-body { flex: 1; overflow-y: auto; padding: 6px 20px 16px; font-size: 14.5px; line-height: 1.75; color: #d3e1ee; }
+.tu-body h3 { margin-top: 10px; font-size: 20px; }
+.tu-body h4 { font-family: var(--ui); color: #ffd27a; font-size: 16px; margin: 14px 0 4px; }
+.tu-body ul, .tu-body ol { padding-left: 20px; margin: 6px 0; }
+.tu-body li { margin-bottom: 4px; }
+.tu-body b { color: #fff; }
+.tu-body .tip { background: rgba(93,255,157,0.07); border-left: 3px solid var(--good); padding: 8px 12px; color: #c8ffe0; }
+.tu-body .g { color: var(--good); font-weight: 700; } .tu-body .y { color: var(--warn); font-weight: 700; }
+.tk-mob { display: none; } body.mobile .tk-pc { display: none; } body.mobile .tk-mob { display: inline; }
+.tu-foot { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line); }
+#tu-page { color: var(--dim); font-family: var(--ui); }
+body.mobile #tutorial { width: 100vw; height: 100vh; border-radius: 0; }
+body.mobile .tu-list { width: 150px; } body.mobile .tu-list button { font-size: 12.5px; padding: 6px; }
+body.mobile .tu-body { font-size: 13.5px; padding: 4px 12px 12px; }

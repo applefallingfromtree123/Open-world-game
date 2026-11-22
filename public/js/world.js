@@ -262,12 +262,14 @@ export class World {
     for (const f of this.fields) { const d = f.pos.distanceToSquared(p); if (d < bd) { bd = d; best = f; } }
     return best;
   }
-  massLocked(p) {
-    for (const s of this.stations) if (s.pos.distanceToSquared(p) < 3000 * 3000) return true;
-    for (const pl of this.planets) { const d = pl.pos.distanceTo(p); if (d < pl.radius * 1.08 + 800) return true; }
-    if (this.star.pos.distanceTo(p) < this.star.radius * 1.6) return true;
-    for (const s of this.ships) if (!s.dead && !s.isPlayer && s.spec.mass >= 2.5 && s.brain && s.brain.role !== 'wing' && this.hostile(s, this.player) && s.pos.distanceToSquared(p) < 3000 * 3000) return true;
-    return false;
+  massLocked(p) { return !!this.massLockSource(p); }
+  // 질량 고정 원인: { name, pos, need(벗어나기까지 남은 거리) } 또는 null
+  massLockSource(p) {
+    for (const s of this.stations) { const d = s.pos.distanceTo(p); if (d < 3000) return { name: `${s.name} (스테이션 3km 이내)`, pos: s.pos, need: 3000 - d }; }
+    for (const pl of this.planets) { const d = pl.pos.distanceTo(p), lim = pl.radius * 1.08 + 800; if (d < lim) return { name: `${pl.name} (행성 근접)`, pos: pl.pos, need: lim - d }; }
+    { const d = this.star.pos.distanceTo(p), lim = this.star.radius * 1.6; if (d < lim) return { name: '항성 근접', pos: this.star.pos, need: lim - d }; }
+    for (const s of this.ships) if (!s.dead && !s.isPlayer && s.spec.mass >= 2.5 && s.brain && s.brain.role !== 'wing' && this.hostile(s, this.player)) { const d = s.pos.distanceTo(p); if (d < 3000) return { name: `적대 대형 함선 ${s.name}`, pos: s.pos, need: 3000 - d }; }
+    return null;
   }
   cruiseEnv(ship) {
     let g = Infinity;

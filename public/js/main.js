@@ -9,6 +9,7 @@ import { IN, initInput, hit, down, endFrame, updateStick, releaseLock, centerSti
 import { initHangar, updateHangar, showShip, hangarInput, HG } from './hangar.js';
 import { initUI, toast, commsLine, banner, updateHudDom, openStation, closeStation, refreshStation, openMenu, closeMenu } from './ui.js';
 import { initMap, openMap, drawMap, renderSide, selectedSystem } from './map.js';
+import { initTutorial, openTutorial, closeTutorial, tutorialOpen } from './tutorial.js';
 import { DEV, initTouch, updateTouch, askDevice, setDevice, savedDevice } from './touch.js';
 import { Net } from './net.js';
 import { World, systemData } from './world.js';
@@ -81,6 +82,8 @@ function boot() {
   initMap(game);
   initInput(canvas, { onKey, wantLock: () => !DEV.mobile && game.state === 'play' && !game.docked && !game.mapOpen && !game.menuOpen });
   initTouch(game);
+  initTutorial(game);
+  game.openTutorial = (i) => { releaseLock(); openTutorial(i); };
   const dev = savedDevice();
   if (dev) setDevice(dev); else askDevice(() => {});
   $('btn-device').onclick = () => askDevice(() => {});
@@ -158,11 +161,12 @@ function startGame(save) {
   }
   banner(`환영합니다, ${save.name}`, `${game.world.sys.name} 성계 · ${rankOf().name}`, '#5ce1ff');
   if (!save.seenIntro) { save.seenIntro = true; setTimeout(() => showIntro(), 600); }
+  if (!save.tutorialDone) setTimeout(() => game.openTutorial(0), 900);
   saveNow();
 }
 function showIntro() {
   commsLine('관제소', `${S.save.name} 파일럿, 은하에 오신 것을 환영합니다. 무엇을 할지는 전적으로 당신의 자유입니다.`, '#5ce1ff');
-  commsLine('관제소', '시장에서 무역, 소행성 채굴, 해적 사냥, 탐사, 임무... 출항(Undock) 후 H키 도움말은 ESC → 조작법에서.', '#5ce1ff');
+  commsLine('관제소', '무엇부터 할지 모르겠다면 메뉴 → 튜토리얼(또는 설정 → 초보자 튜토리얼)을 열어보세요. 🔊 버튼으로 읽어드립니다.', '#5ce1ff');
 }
 function persistShip() {
   const P = game.playerShip, rec = activeShip();
@@ -464,7 +468,11 @@ function buildOutpostHere() {
 function tryHyperjump() {
   const P = game.playerShip, w = game.world;
   if (!P || P.dead || game.hyper) return;
-  if (game.hyperCharge > 0) { game.hyperCharge = 0; game.msg('하이퍼점프 취소', 'info'); return; }
+  if (game.hyperCharge > 0) {
+    const lock = P.cruise !== 2 && w.massLockSource(P.pos);
+    game.msg(lock ? `점프 대기 중 — 질량 고정: ${lock.name}, ${fmtDist(lock.need)} 더 멀어지면 충전 재개 (자동 이탈 중)` : `하이퍼점프 충전 중 ${Math.round(game.hyperCharge / 4 * 100)}% — 취소: ${DEV.mobile ? '[점프] 버튼 길게 누르기' : 'ESC'}`, 'info');
+    return;
+  }
   // 최종 목적지 결정: 저장된 경로 → 지도에서 선택한 성계
   let dest = (S.save.route || []).length ? S.save.route[S.save.route.length - 1] : null;
   const sel = selectedSystem();
@@ -489,13 +497,36 @@ function tryHyperjump() {
   game.msg(`하이퍼점프 충전 — ${game.galaxy.byId[next].name}${route.length > 1 ? ` (남은 도약 ${route.length}회)` : ''}`, 'info');
 }
 game.tryHyperjump = tryHyperjump;
+// 사용자가 직접 조작하면 오토파일럿 해제 (자동 이탈은 6초간 다시 켜지지 않음)
+game.manualOverride = () => {
+  if (!game.autopilot) return;
+  if (game.autopilot.escape) game.noEscapeUntil = performance.now() + 6000;
+  else game.msg('오토파일럿 해제', 'info');
+  game.autopilot = null;
+};
+game.cancelJump = () => {
+  if (game.hyperCharge <= 0) return;
+  game.hyperCharge = 0; game.jumpHint = '';
+  if (game.autopilot && game.autopilot.escape) game.autopilot = null;
+  game.msg('하이퍼점프 취소', 'info');
+};
 function doHyper(dt) {
   const P = game.playerShip;
   if (game.hyperCharge > 0) {
     if (P.dead || game.docked) { game.hyperCharge = 0; return; }
     // 질량 고정 중에는 충전이 멈춤 (멀어지면 자동 재개)
-    if (P.cruise !== 2 && game.world.massLocked(P.pos)) game.hint = '질량 고정 — 스테이션/행성에서 멀어지면 점프 충전이 계속됩니다 (J 크루즈 추천)';
-    else game.hyperCharge += dt;
+    const lock = P.cruise !== 2 ? game.world.massLockSource(P.pos) : null;
+    if (lock) {
+      game.jumpHint = `⏸ 점프 대기 — 질량 고정: ${lock.name} · ${fmtDist(lock.need)} 더 이동 필요`;
+      // 수동 조작이 없으면 자동으로 구역 이탈
+      if ((!game.autopilot || game.autopilot.escape) && !(game.noEscapeUntil > performance.now())) {
+        game.autopilot = { escape: true, from: lock.pos, label: '질량 고정 구역 자동 이탈 중 (조작하면 해제)' };
+      }
+    } else {
+      game.jumpHint = '';
+      if (game.autopilot && game.autopilot.escape) game.autopilot = null;
+      game.hyperCharge += dt;
+    }
     if (game.hyperCharge >= 4) {
       game.hyperCharge = 0;
       game.hyper = { t: 0, target: game.hyperTarget, loaded: false };
@@ -557,8 +588,10 @@ game.targetMission = (m) => {
 function onKey(e) {
   if (game.state !== 'play') return;
   if (e.code === 'Escape') {
+    if (tutorialOpen()) return closeTutorial();
     if (game.mapOpen) return toggleMap(false);
     if (game.menuOpen) return closeMenuFn();
+    if (game.hyperCharge > 0) return game.cancelJump();
     if (game.autopilot) { game.autopilot = null; game.msg('오토파일럿 해제', 'info'); return; }
     openMenuFn();
     return;
@@ -635,6 +668,14 @@ function startAutopilot(t) {
 }
 function runAutopilot(dt) {
   const ap = game.autopilot, P = game.playerShip, w = game.world, c = P.ctrl;
+  if (ap.escape) {
+    // 원인 지점의 반대 방향(약간 위쪽)으로 전속 이탈
+    const away = _b.copy(P.pos).sub(ap.from).normalize().add(_a.set(0, 0.25, 0)).normalize().multiplyScalar(20000).add(P.pos);
+    const r = steer(P, away, { gain: 2.6, bank: false, level: true });
+    c.throttle = r.dot > 0.5 ? 1 : 0.3; c.boost = r.dot > 0.8 && P.energy > 5; c.sx = 0; c.sy = 0;
+    if (game.hyperCharge <= 0) game.autopilot = null;
+    return;
+  }
   const t = ap.target;
   if (!t || (t.isShip) || !w.nav.includes(t) && t.kind !== 'can') { game.autopilot = null; return; }
   const dock = t.kind === 'station' || t.kind === 'outpost';
@@ -686,8 +727,8 @@ function flightControls(dt) {
   IN.freelook = down('AltLeft') || down('AltRight');
   if (IN.wheel) game.camDist = clamp(game.camDist * (1 + IN.wheel * 0.1), 0.5, 4);
 
-  const manual = down('KeyW') || down('KeyS') || down('KeyX') || down('KeyA') || down('KeyD');
-  if (game.autopilot && manual) { game.autopilot = null; game.msg('오토파일럿 해제', 'info'); }
+  const manual = down('KeyW') || down('KeyS') || down('KeyX') || down('KeyA') || down('KeyD') || (IN.touch && Math.hypot(IN.vx, IN.vy) > 0.3);
+  if (game.autopilot && manual) game.manualOverride();
   if (game.autopilot) { runAutopilot(dt); centerStick(); c.fire1 = IN.lmb || down('Space'); c.fire2 = IN.rmb; return; }
 
   updateStick(E.W, E.H, st.sens, st.mouseMode);
@@ -846,7 +887,7 @@ function simulate(dt, now) {
     if (game.autopilot && game.autopilot.phase === 1 && game.autopilot.target.entrance.distanceTo(PP.pos) < 90 + PP.radius) { dockAt(game.autopilot.target); return false; }
     // 도킹 안내
     const st = w.nearestStation(PP.pos);
-    if (st && st.pos.distanceTo(PP.pos) < 6000 && !game.autopilot) game.hint = `${st.name} — ${DEV.mobile ? '[자동 도킹] 버튼' : 'G: 자동 도킹'}`;
+    if (st && st.pos.distanceTo(PP.pos) < 6000 && !game.autopilot && !game.hyperCharge) game.hint = `${st.name} — ${DEV.mobile ? '[자동 도킹] 버튼' : 'G: 자동 도킹'}`;
     for (const a of w.anoms) if (a.pos.distanceTo(PP.pos) < 600 && !a.looted && (a.type === 'wreck' || a.type === 'cache' || a.type === 'ruins')) game.hint = `${a.name} — ${DEV.mobile ? '[자동 도킹] 버튼으로 ' : 'G: '}${a.type === 'ruins' ? '해킹' : '회수'}`;
     S.save.stats.dist += PP.speed * dt;
   } else {
