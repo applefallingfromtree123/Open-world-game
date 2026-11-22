@@ -3,7 +3,7 @@ export const IN = {
   keys: new Set(), pressed: new Set(),
   mx: 0, my: 0,                 // 화면 좌표
   vx: 0, vy: 0,                 // 가상 조이스틱 (-1..1)
-  lmb: false, rmb: false, wheel: 0, locked: false, enabled: true, freelook: false, active: false, touch: false,
+  lmb: false, rmb: false, wheel: 0, locked: false, enabled: true, freelook: false, active: false, touch: false, sx: 0, sy: 0,
   dx: 0, dy: 0,
 };
 let canvas;

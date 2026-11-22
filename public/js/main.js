@@ -696,8 +696,8 @@ function flightControls(dt) {
   c.yaw = IN.freelook ? 0 : dz(IN.vx);
   c.pitch = IN.freelook ? 0 : dz(IN.vy) * (st.invertY ? 1 : -1);
   c.roll = (down('KeyE') ? 1 : 0) - (down('KeyQ') ? 1 : 0);
-  c.sx = (down('KeyD') ? 1 : 0) - (down('KeyA') ? 1 : 0);
-  c.sy = (down('KeyR') ? 1 : 0) - (down('KeyF') ? 1 : 0);
+  c.sx = clamp((down('KeyD') ? 1 : 0) - (down('KeyA') ? 1 : 0) + IN.sx, -1, 1);
+  c.sy = clamp((down('KeyR') ? 1 : 0) - (down('KeyF') ? 1 : 0) + IN.sy, -1, 1);
   if (down('KeyW')) c.throttle = Math.min(1, c.throttle + dt * 0.9);
   if (down('KeyS')) c.throttle = Math.max(P.cruise ? 0.05 : -0.5, c.throttle - dt * 0.9);
   if (hit('KeyX')) c.throttle = 0;

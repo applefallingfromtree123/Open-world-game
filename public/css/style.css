@@ -278,6 +278,15 @@ h3 { font-family: var(--ui); font-weight: 700; font-size: 16px; color: var(--hud
 .t-thr b { position: absolute; top: 6px; left: 0; right: 0; text-align: center; font-family: var(--ui); font-size: 13px; color: #fff; }
 .t-thr span { position: absolute; bottom: 4px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--dim); }
 
+.t-strafe { position: absolute; right: calc(env(safe-area-inset-right) + 78px); bottom: 196px; width: 104px; height: 104px; border-radius: 50%; border: 1px solid rgba(120,200,255,0.35); background: rgba(10,22,36,0.45); touch-action: none; backdrop-filter: blur(3px); }
+.t-strafe.on { border-color: var(--hud); background: rgba(10,22,36,0.6); }
+.t-strafe i { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, rgba(255,214,160,0.9), rgba(200,120,50,0.7)); box-shadow: 0 0 10px rgba(255,138,60,0.5); pointer-events: none; }
+.t-strafe .ar { position: absolute; font-size: 10px; color: rgba(200,230,255,0.5); pointer-events: none; }
+.t-strafe .u { top: 3px; left: 50%; transform: translateX(-50%); } .t-strafe .d { bottom: 3px; left: 50%; transform: translateX(-50%); }
+.t-strafe .l { left: 5px; top: 50%; transform: translateY(-50%); } .t-strafe .r { right: 5px; top: 50%; transform: translateY(-50%); }
+.t-strafe em { position: absolute; top: -16px; left: 0; right: 0; text-align: center; font-style: normal; font-size: 10px; color: var(--dim); pointer-events: none; }
+@media (max-height: 380px) { .t-strafe { width: 88px; height: 88px; bottom: 186px; } .t-actions button { height: 36px; } }
+
 /* ---------- 모바일 레이아웃 ---------- */
 body.mobile { font-size: 13px; }
 body.mobile #keys-hint, body.mobile #tracker { display: none; }

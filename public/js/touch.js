@@ -88,6 +88,25 @@ export function initTouch(g) {
   };
   zone.addEventListener('pointerup', release); zone.addEventListener('pointercancel', release);
 
+  // ---- 평행이동 패드 (고정 위치 미니 스틱): 좌우 = 측면 이동, 위아래 = 상하 이동 ----
+  const pad = root.querySelector('.t-strafe'), pk = pad.querySelector('i');
+  const PR = 42;
+  let pid = null;
+  const padMove = (e) => {
+    const r = pad.getBoundingClientRect();
+    let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    const l = Math.hypot(dx, dy);
+    if (l > PR) { dx = dx / l * PR; dy = dy / l * PR; }
+    pk.style.transform = `translate(${dx}px, ${dy}px)`;
+    const f = (v) => (Math.abs(v) < 0.18 ? 0 : v);
+    IN.sx = f(dx / PR); IN.sy = f(-dy / PR);
+    if ((IN.sx || IN.sy) && game.autopilot) game.autopilot = null;
+  };
+  pad.addEventListener('pointerdown', (e) => { if (pid !== null) return; e.preventDefault(); pid = e.pointerId; pad.setPointerCapture(pid); pad.classList.add('on'); padMove(e); });
+  pad.addEventListener('pointermove', (e) => { if (e.pointerId === pid) padMove(e); });
+  const padUp = (e) => { if (e.pointerId !== pid) return; pid = null; IN.sx = 0; IN.sy = 0; pk.style.transform = ''; pad.classList.remove('on'); };
+  pad.addEventListener('pointerup', padUp); pad.addEventListener('pointercancel', padUp);
+
   // ---- 스로틀 슬라이더 (위 100% · 아래 −50%) ----
   let tid = null;
   const setThr = (e) => {
