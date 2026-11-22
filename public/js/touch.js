@@ -112,6 +112,7 @@ export function initTouch(g) {
   hold(root.querySelector('[data-b="scan"]'), keyOn('KeyV'), keyOff('KeyV'));
   for (const [b, code] of [['cruise', 'KeyJ'], ['auto', 'KeyG'], ['target', 'KeyT'], ['hostile', 'KeyY'], ['cam', 'KeyC'], ['fa', 'KeyZ'], ['stop', 'KeyX']]) tap(root.querySelector(`[data-b="${b}"]`), () => press(code));
   tap(root.querySelector('[data-b="jump"]'), () => game.tryHyperjump());
+  root.querySelector('[data-b="chat"]').addEventListener('click', () => openChat());
   tap(root.querySelector('[data-b="build"]'), () => press('KeyB'));
   // 스크롤/확대 방지
   root.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
@@ -135,3 +136,11 @@ export function updateTouch() {
   root.querySelector('[data-b="missile"]').classList.toggle('hidden', !P.weapons.some((w) => w.w.secondary));
   root.querySelector('[data-b="build"]').classList.toggle('hidden', !((game.save.storage || {}).outpost_kit > 0));
 }
+
+// 모바일 채팅: 화면 위쪽에 큰 입력창을 띄우고 키보드를 연다
+export function openChat() {
+  document.body.classList.add('chatting');
+  const i = document.getElementById('comms-input');
+  i.focus();
+}
+export function closeChat() { document.body.classList.remove('chatting'); }

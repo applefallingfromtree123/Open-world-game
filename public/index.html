@@ -77,7 +77,7 @@
     <div id="target-panel" class="panel hidden"></div>
     <div id="comms" class="panel">
       <div id="comms-log"></div>
-      <input id="comms-input" maxlength="200" placeholder="Enter: 채팅 (/s 성계 채널)">
+      <div id="comms-row"><input id="comms-input" maxlength="200" enterkeyhint="send" autocomplete="off" placeholder="Enter: 채팅 (/s 성계 채널)"><button class="btn small" id="comms-send">전송</button><button class="btn small ghost" id="comms-close">✕</button></div>
     </div>
     <div id="keys-hint">G 자동비행/도킹 · J 크루즈 · H 점프 · T 표적 · V 스캔 · C 시점 · ESC 메뉴</div>
   </div>
@@ -88,7 +88,7 @@
     <div class="t-actions">
       <button data-b="cruise">크루즈</button><button data-b="auto">자동<br>도킹</button><button data-b="jump">점프</button>
       <button data-b="target">표적</button><button data-b="hostile">적</button><button data-b="scan">스캔</button>
-      <button data-b="cam">시점</button><button data-b="fa">관성</button><button data-b="stop">정지</button><button data-b="build" class="hidden">기지</button>
+      <button data-b="cam">시점</button><button data-b="fa">관성</button><button data-b="stop">정지</button><button data-b="chat">채팅</button><button data-b="build" class="hidden">기지</button>
     </div>
     <div class="t-fire">
       <button data-b="boost" class="t-boost">부스트</button>

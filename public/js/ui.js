@@ -28,8 +28,13 @@ export function initUI(g) {
     const t = game.world.nav.find((n) => n.id === id) || game.world.byId.get(id);
     if (t) { P.target = t; sfx.click(); updateNav(true); }
   });
+  const sendChat = () => { const i = $('comms-input'); const v = i.value.trim(); i.value = ''; i.blur(); document.body.classList.remove('chatting'); if (v) game.net.chat(v); };
+  $('comms-send').addEventListener('pointerdown', (e) => { e.preventDefault(); sendChat(); });
+  $('comms-close').addEventListener('pointerdown', (e) => { e.preventDefault(); $('comms-input').blur(); document.body.classList.remove('chatting'); });
+  $('comms-input').addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== $('comms-input')) document.body.classList.remove('chatting'); }, 150));
+  $('comms-input').addEventListener('focus', () => document.body.classList.add('chatting'));
   $('comms-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { const v = e.target.value.trim(); e.target.value = ''; e.target.blur(); if (v) game.net.chat(v); }
+    if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
     if (e.key === 'Escape') e.target.blur();
     e.stopPropagation();
   });

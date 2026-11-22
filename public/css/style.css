@@ -297,7 +297,17 @@ body.mobile #target-panel .tp-row:nth-of-type(n+3), body.mobile .tp-cargo { disp
 body.mobile #comms { left: calc(env(safe-area-inset-left) + 8px); top: 92px; bottom: auto; width: 200px; padding: 4px; background: rgba(8,14,24,0.4); }
 body.mobile #nav-panel:not(.folded) ~ #comms { display: none; }
 body.mobile #comms-log { height: 46px; font-size: 11px; }
-body.mobile #comms-input { display: none; }
+body.mobile #comms-row { display: none; }
+#comms-row { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
+#comms-row #comms-input { flex: 1; margin-top: 0; }
+#comms-send, #comms-close { display: none; }
+body.chatting #comms-send, body.chatting #comms-close { display: inline-block; }
+body.mobile.chatting #comms-row { display: flex; }
+body.mobile.chatting #comms { display: block !important; top: calc(env(safe-area-inset-top) + 6px); left: 50%; transform: translateX(-50%); width: min(580px, 88vw); z-index: 60; background: rgba(8,14,24,0.95); padding: 6px; }
+body.mobile.chatting #comms-log { height: 84px; font-size: 12.5px; }
+body.mobile.chatting #comms-input { font-size: 16px; padding: 9px 10px; }
+body.mobile.chatting #comms-send { padding: 9px 14px; font-size: 14px; }
+body.mobile.chatting #touch { display: none; }
 body.mobile #comms-input { padding: 3px 6px; font-size: 12px; }
 body.mobile #toasts { top: 96px; }
 body.mobile .toast { font-size: 12px; padding: 4px 10px; }
