@@ -15,17 +15,28 @@ export function initMap(g) {
   x = cv.getContext('2d');
   side = document.getElementById('map-side');
   let lx = 0, ly = 0;
-  cv.addEventListener('mousedown', (e) => { M.drag = true; M.moved = 0; lx = e.clientX; ly = e.clientY; });
-  window.addEventListener('mouseup', (e) => {
+  cv.style.touchAction = 'none';
+  const pts = new Map(); let pinch = 0;
+  cv.addEventListener('pointerdown', (e) => { pts.set(e.pointerId, [e.clientX, e.clientY]); if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); M.moved = 99; } M.drag = true; if (pts.size === 1) M.moved = 0; lx = e.clientX; ly = e.clientY; M.mx = e.clientX; M.my = e.clientY; });
+  window.addEventListener('pointercancel', (e) => { pts.delete(e.pointerId); M.drag = pts.size > 0; });
+  window.addEventListener('pointerup', (e) => {
+    pts.delete(e.pointerId);
+    if (pts.size) return;
+    // 탭 위치에서 가장 가까운 성계 선택
+    if (M.moved < 8 && game.mapOpen) M.hover = nearestAt(e.clientX, e.clientY);
     if (!M.drag) return; M.drag = false;
-    if (M.moved < 5 && game.mapOpen && M.hover) { M.sel = M.hover; if (M.sel.id !== game.world.sys.id) plot(M.sel.id, true); else renderSide(); }
+    if (M.moved < 8 && game.mapOpen && M.hover) { M.sel = M.hover; if (M.sel.id !== game.world.sys.id) plot(M.sel.id, true); else renderSide(); }
   });
-  cv.addEventListener('mousemove', (e) => {
+  cv.addEventListener('pointermove', (e) => {
+    if (pts.has(e.pointerId)) pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); if (pinch) M.zoom = Math.max(2.5, Math.min(30, M.zoom * d / pinch)); pinch = d; return; }
     if (M.drag) { M.yaw -= (e.clientX - lx) * 0.006; M.pitch = Math.max(0.1, Math.min(1.5, M.pitch + (e.clientY - ly) * 0.005)); M.moved += Math.abs(e.clientX - lx) + Math.abs(e.clientY - ly); lx = e.clientX; ly = e.clientY; }
     M.mx = e.clientX; M.my = e.clientY;
   });
   cv.addEventListener('dblclick', () => { if (M.hover && M.hover.id !== game.world.sys.id) { M.sel = M.hover; plot(M.sel.id); game.tryHyperjump(); } });
   cv.addEventListener('wheel', (e) => { M.zoom = Math.max(2.5, Math.min(30, M.zoom * (1 - Math.sign(e.deltaY) * 0.1))); e.preventDefault(); }, { passive: false });
+  document.getElementById('map-zin').onclick = () => { M.zoom = Math.min(30, M.zoom * 1.25); };
+  document.getElementById('map-zout').onclick = () => { M.zoom = Math.max(2.5, M.zoom / 1.25); };
   document.querySelectorAll('#map-tabs button').forEach((b) => b.addEventListener('click', () => { M.tab = b.dataset.tab; document.querySelectorAll('#map-tabs button').forEach((o) => o.classList.toggle('active', o === b)); renderSide(); }));
 }
 export function openMap() {
@@ -63,6 +74,7 @@ export function drawMap(dt) {
     x.stroke();
   }
   const P = new Map(gal.systems.map((s) => [s.id, proj(s.pos)]));
+  lastP = P;
   // 항로 (도약 가능 범위)
   for (const s of gal.systems) for (const n of s.links) {
     if (n < s.id) continue;
@@ -127,6 +139,13 @@ function plot(id, quiet) {
   renderSide();
 }
 export function selectedSystem() { return M.sel; }
+let lastP = null;
+function nearestAt(px, py) {
+  if (!lastP) return null;
+  let best = null, bd = 30;
+  for (const s of game.galaxy.systems) { const p = lastP.get(s.id); if (!p) continue; const d = Math.hypot(px - p.x, py - p.y); if (d < bd) { bd = d; best = s; } }
+  return best;
+}
 export function selectSystem(id) { M.sel = game.galaxy.byId[id]; plot(id, true); }
 
 function renderSide() {

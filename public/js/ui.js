@@ -19,7 +19,8 @@ export function initUI(g) {
   document.querySelectorAll('#menu-tabs button').forEach((b) => b.addEventListener('click', () => { sfx.click(); menuTab(b.dataset.tab); }));
   $('btn-undock').onclick = () => game.undock();
   $('btn-menu-close').onclick = () => game.closeMenu();
-  $('nav-tabs').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { navTab = b.dataset.tab; $('nav-tabs').querySelectorAll('button').forEach((o) => o.classList.toggle('active', o === b)); updateNav(true); }));
+  $('nav-fold').onclick = (e) => { e.stopPropagation(); $('nav-panel').classList.toggle('folded'); };
+  $('nav-tabs').querySelectorAll('button[data-tab]').forEach((b) => b.addEventListener('click', () => { $('nav-panel').classList.remove('folded'); navTab = b.dataset.tab; $('nav-tabs').querySelectorAll('button[data-tab]').forEach((o) => o.classList.toggle('active', o === b)); updateNav(true); }));
   $('nav-list').addEventListener('click', (e) => {
     const el = e.target.closest('[data-id]'); if (!el) return;
     const id = el.dataset.id;
@@ -619,7 +620,8 @@ function mSettings(body) {
   row('마우스 감도', range(st.sens, 0.3, 2.5, 0.1, (v) => { st.sens = v; }));
   row('마우스 Y축 반전', select(String(st.invertY), [['false', '끔'], ['true', '켬']], (v) => { st.invertY = v === 'true'; }));
   row('마우스 조종 방식', select(st.mouseMode, [['virtual', '가상 조이스틱 (커서 위치 유지)'], ['relative', '상대 이동 (자동 중앙 복귀)']], (v) => { st.mouseMode = v; }));
-  row('그래픽 품질', select(st.quality, [['high', '높음 (그림자 · 고해상도)'], ['mid', '중간'], ['low', '낮음 (그림자 끔)']], (v) => { st.quality = v; game.setQuality(v); }));
+  row('조작 기기', select(document.body.classList.contains('mobile') ? 'mobile' : 'pc', [['pc', 'PC (키보드 + 마우스)'], ['mobile', '모바일 (터치 스틱)']], (v) => { game.setDevice(v); toast(v === 'mobile' ? '터치 조작으로 전환' : 'PC 조작으로 전환', 'info'); }));
+  row('그래픽 품질', select(st.quality, [['high', '높음 (그림자 · 고해상도)'], ['mid', '중간'], ['low', '낮음 (그림자 끔)']], (v) => { st.quality = v; st.qSet = true; game.setQuality(v); }));
   row('HUD 색상', (() => { const i = el('input'); i.type = 'color'; i.value = st.hudColor; i.oninput = () => { st.hudColor = i.value; document.documentElement.style.setProperty('--hud', i.value); }; return i; })());
   const r = el('div', 'row');
   r.append(btn('저장 후 로그아웃', 'warn', () => game.logout()));

@@ -182,7 +182,8 @@ export function drawHud(g) {
 
 function drawRadar(g, C) {
   const P = g.playerShip, w = g.world;
-  const cx = W / 2, cy = H - 92, rw = Math.min(150, W * 0.12), rh = rw * 0.45;
+  const mob = document.body.classList.contains('mobile');
+  const cx = W / 2, rw = mob ? Math.min(85, W * 0.11) : Math.min(150, W * 0.12), rh = rw * 0.45, cy = H - (mob ? rh + 18 : 92);
   const R = HUD.radarRange;
   x.save();
   const grd = x.createRadialGradient(cx, cy, 0, cx, cy, rw);
@@ -236,9 +237,10 @@ function bar(px, py, w, h, frac, col, label, val) {
 
 function drawGauges(g, C) {
   const P = g.playerShip, s = P.stats;
-  const rw = Math.min(150, W * 0.12);
-  const GW = 150;
-  const lx = W / 2 - rw - GW - 18, by = H - 140;
+  const mob = document.body.classList.contains('mobile');
+  const rw = mob ? Math.min(85, W * 0.11) : Math.min(150, W * 0.12);
+  const GW = mob ? 96 : 150;
+  const lx = W / 2 - rw - GW - 18, by = H - (mob ? 104 : 140);
   // 왼쪽: 실드 · 선체 · 에너지 · 연료
   bar(lx, by, GW, 8, P.shieldDown ? 0 : P.shield / s.shield, P.shieldDown ? '#335' : '#4fc8ff', P.shieldDown ? '실드 재가동 중' : '실드', Math.round(P.shield));
   bar(lx, by + 26, GW, 8, P.hull / s.hull, P.hull / s.hull < 0.3 ? '#ff4d5e' : '#ffae5a', '선체', Math.round(P.hull));
@@ -281,7 +283,7 @@ function drawCenter(g, C) {
   if (g.autopilot) lines.push([g.autopilot.label, '#7dff9a']);
   if (HUD.scan > 0) lines.push([`스캔 중 ${Math.round(HUD.scan * 100)}%`, '#ffd84d']);
   if (g.hint) lines.push([g.hint, C]);
-  let y = 110;
+  let y = document.body.classList.contains('mobile') ? 128 : 110;
   for (const [t, c] of lines) { text(t, W / 2, y, c, 15, 'center'); y += 22; }
   if (HUD.scan > 0) { x.fillStyle = 'rgba(0,0,0,0.5)'; x.fillRect(W / 2 - 100, y - 10, 200, 6); x.fillStyle = '#ffd84d'; x.fillRect(W / 2 - 100, y - 10, 200 * HUD.scan, 6); }
 }

@@ -89,9 +89,10 @@ export function updateHangar(dt) {
 }
 export function hangarInput(el) {
   let lx = 0, ly = 0;
-  el.addEventListener('mousedown', (e) => { HG.drag = true; HG.auto = false; lx = e.clientX; ly = e.clientY; });
-  window.addEventListener('mouseup', () => { HG.drag = false; });
-  window.addEventListener('mousemove', (e) => {
+  el.style.touchAction = 'none';
+  el.addEventListener('pointerdown', (e) => { HG.drag = true; HG.auto = false; lx = e.clientX; ly = e.clientY; });
+  window.addEventListener('pointerup', () => { HG.drag = false; });
+  window.addEventListener('pointermove', (e) => {
     if (!HG.drag) return;
     HG.yaw += (e.clientX - lx) * 0.006; HG.pitch = Math.max(-0.1, Math.min(1.2, HG.pitch + (e.clientY - ly) * 0.004));
     lx = e.clientX; ly = e.clientY;

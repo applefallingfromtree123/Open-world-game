@@ -2,7 +2,9 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>STARDRIFT — 오픈월드 3D 우주 샌드박스</title>
   <meta name="description" content="브라우저에서 즐기는 6자유도 3D 우주 비행 샌드박스. 무역, 채굴, 현상금 사냥, 해적질, 탐험, 기지 건설, 멀티플레이.">
   <meta name="theme-color" content="#04060b">
@@ -15,6 +17,20 @@
 <body>
   <canvas id="game"></canvas>
   <canvas id="hud-canvas"></canvas>
+
+  <!-- ================= 기기 선택 ================= -->
+  <div id="device-pick" class="hidden">
+    <div class="dp-box">
+      <div class="dp-logo">STARDRIFT</div>
+      <div class="dp-q">어떤 기기로 플레이하시나요?</div>
+      <div class="dp-opts">
+        <button data-dev="pc"><span class="dp-ic">🖥</span><b>PC</b><em>키보드 + 마우스</em></button>
+        <button data-dev="mobile"><span class="dp-ic">📱</span><b>모바일 · 태블릿</b><em>화면 터치 조작 (가상 스틱)</em></button>
+      </div>
+      <div class="dp-note">나중에 메뉴 → 설정에서 바꿀 수 있습니다</div>
+    </div>
+  </div>
+  <div id="rotate-hint"><div>📱↻<br>가로 모드로 돌려주세요</div></div>
 
   <!-- ================= 타이틀 / 로그인 ================= -->
   <div id="login-screen">
@@ -30,6 +46,7 @@
         </div>
         <button type="button" id="btn-offline" class="btn ghost">오프라인으로 플레이 (브라우저에 저장)</button>
         <div id="login-msg"></div>
+        <button type="button" id="btn-device" class="btn ghost small">조작 기기 변경</button>
       </form>
       <div id="server-status"><span class="dot"></span> <span id="server-status-text">서버 연결 중...</span></div>
       <div class="features">
@@ -53,7 +70,7 @@
     </div>
     <div id="credits-box"><span id="credits">0 Cr</span><button class="btn small" data-act="menu">☰ 메뉴</button><button class="btn small" data-act="map">◎ 지도</button></div>
     <div id="nav-panel" class="panel">
-      <div id="nav-tabs"><button data-tab="nav" class="active">항법</button><button data-tab="contacts">접촉</button></div>
+      <div id="nav-tabs"><button data-tab="nav" class="active">항법</button><button data-tab="contacts">접촉</button><button id="nav-fold" title="접기/펼치기">▾</button></div>
       <div id="nav-list"></div>
     </div>
     <div id="tracker"></div>
@@ -64,6 +81,23 @@
     </div>
     <div id="keys-hint">G 자동비행/도킹 · J 크루즈 · H 점프 · T 표적 · V 스캔 · C 시점 · ESC 메뉴</div>
   </div>
+  <!-- ================= 모바일 터치 조작 ================= -->
+  <div id="touch" class="hidden">
+    <div class="t-stick-zone"><div class="t-stick"><i></i></div><span class="t-zone-hint">조종</span></div>
+    <div class="t-roll"><button data-b="rollL">⟲</button><button data-b="rollR">⟳</button></div>
+    <div class="t-actions">
+      <button data-b="cruise">크루즈</button><button data-b="auto">자동<br>도킹</button><button data-b="jump">점프</button>
+      <button data-b="target">표적</button><button data-b="hostile">적</button><button data-b="scan">스캔</button>
+      <button data-b="cam">시점</button><button data-b="fa">관성</button><button data-b="stop">정지</button><button data-b="build" class="hidden">기지</button>
+    </div>
+    <div class="t-fire">
+      <button data-b="boost" class="t-boost">부스트</button>
+      <button data-b="missile" class="t-missile">미사일</button>
+      <button data-b="fire" class="t-main">발사</button>
+    </div>
+    <div class="t-thr"><div class="fill"></div><div class="zero"></div><b>0%</b><span>스로틀</span></div>
+  </div>
+
   <div id="toasts"></div>
   <div id="banner"></div>
 
@@ -107,6 +141,7 @@
   <!-- ================= 은하 지도 ================= -->
   <div id="map" class="hidden">
     <canvas id="map-canvas"></canvas>
+    <div id="map-zoom"><button class="btn" id="map-zin">＋</button><button class="btn" id="map-zout">－</button></div>
     <div id="map-top"><div class="win-title">은하 지도</div><div class="dim">드래그: 회전 · 휠: 확대 · 클릭: 경로 설정 · H 또는 더블클릭: 점프 · M/ESC: 닫기</div><button class="btn" data-act="closemap">✕</button></div>
     <div id="map-panel" class="panel">
       <div id="map-tabs" class="tabs"><button data-tab="galaxy" class="active">은하</button><button data-tab="system">현재 성계</button></div>

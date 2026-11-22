@@ -3,7 +3,7 @@ export const IN = {
   keys: new Set(), pressed: new Set(),
   mx: 0, my: 0,                 // 화면 좌표
   vx: 0, vy: 0,                 // 가상 조이스틱 (-1..1)
-  lmb: false, rmb: false, wheel: 0, locked: false, enabled: true, freelook: false, active: false,
+  lmb: false, rmb: false, wheel: 0, locked: false, enabled: true, freelook: false, active: false, touch: false,
   dx: 0, dy: 0,
 };
 let canvas;
@@ -19,7 +19,7 @@ export function initInput(cv, opts) {
   window.addEventListener('keyup', (e) => { IN.keys.delete(e.code); });
   window.addEventListener('blur', () => { IN.keys.clear(); IN.lmb = IN.rmb = false; });
   cv.addEventListener('mousedown', (e) => {
-    if (!IN.enabled) return;
+    if (!IN.enabled || IN.touch) return;
     if (opts.wantLock() && !IN.locked) {
       const first = !IN.active;
       IN.active = true;
@@ -45,7 +45,7 @@ export function endFrame() { IN.pressed.clear(); IN.wheel = 0; IN.dx = 0; IN.dy 
 
 // 가상 조이스틱 갱신
 export function updateStick(W, H, sens, mode) {
-  if (IN.freelook) return;
+  if (IN.freelook || IN.touch) return;   // 모바일: 터치 스틱이 직접 값을 넣음
   if (IN.locked) {
     const k = 0.0028 * sens;
     IN.vx += IN.dx * k; IN.vy += IN.dy * k;

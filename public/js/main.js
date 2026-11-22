@@ -9,6 +9,7 @@ import { IN, initInput, hit, down, endFrame, updateStick, releaseLock, centerSti
 import { initHangar, updateHangar, showShip, hangarInput, HG } from './hangar.js';
 import { initUI, toast, commsLine, banner, updateHudDom, openStation, closeStation, refreshStation, openMenu, closeMenu } from './ui.js';
 import { initMap, openMap, drawMap, renderSide, selectedSystem } from './map.js';
+import { DEV, initTouch, updateTouch, askDevice, setDevice, savedDevice } from './touch.js';
 import { Net } from './net.js';
 import { World, systemData } from './world.js';
 import { Missions } from './missions.js';
@@ -78,7 +79,12 @@ function boot() {
   game.net = new Net(game);
   initUI(game);
   initMap(game);
-  initInput(canvas, { onKey, wantLock: () => game.state === 'play' && !game.docked && !game.mapOpen && !game.menuOpen });
+  initInput(canvas, { onKey, wantLock: () => !DEV.mobile && game.state === 'play' && !game.docked && !game.mapOpen && !game.menuOpen });
+  initTouch(game);
+  const dev = savedDevice();
+  if (dev) setDevice(dev); else askDevice(() => {});
+  $('btn-device').onclick = () => askDevice(() => {});
+  game.setDevice = setDevice;
   game.net.onStatus = (ok) => {
     $('server-status').className = ok ? 'ok' : 'bad';
     $('server-status-text').textContent = ok ? `서버 연결됨 · 접속 ${game.net.online}명` : '서버 연결 중... (오프라인 플레이 가능)';
@@ -131,6 +137,9 @@ function loadLocal(name) { try { const j = localStorage.getItem('sd_save_' + nam
 function startGame(save) {
   S.save = save;
   if (!save.active) save.active = save.ships[0].id;
+  // 모바일 기본 그래픽: 낮음 (사용자가 직접 바꾸면 유지)
+  if (DEV.mobile && !save.settings.qSet) save.settings.quality = 'low';
+  if (DEV.mobile) document.getElementById('nav-panel').classList.add('folded');
   setVolumes(save.settings.sfx, save.settings.music);
   if (save.settings.quality !== E.quality) setQuality(save.settings.quality);
   document.documentElement.style.setProperty('--hud', save.settings.hudColor);
@@ -682,7 +691,7 @@ function flightControls(dt) {
   if (game.autopilot) { runAutopilot(dt); centerStick(); c.fire1 = IN.lmb || down('Space'); c.fire2 = IN.rmb; return; }
 
   updateStick(E.W, E.H, st.sens, st.mouseMode);
-  if (!IN.active && !IN.locked) game.hint = '화면을 클릭하면 마우스 조종이 시작됩니다';
+  if (!DEV.mobile && !IN.active && !IN.locked) game.hint = '화면을 클릭하면 마우스 조종이 시작됩니다';
   const dz = (v) => { const a = Math.abs(v); return a < 0.04 ? 0 : Math.sign(v) * Math.pow((a - 0.04) / 0.96, 1.3); };
   c.yaw = IN.freelook ? 0 : dz(IN.vx);
   c.pitch = IN.freelook ? 0 : dz(IN.vy) * (st.invertY ? 1 : -1);
@@ -775,6 +784,7 @@ function updateCamera(dt) {
 let last = performance.now(), saveT = 0, hudT = 0;
 function loop(now) {
   requestAnimationFrame(loop);
+  updateTouch();
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (game.state === 'login' || game.docked) {
@@ -836,8 +846,8 @@ function simulate(dt, now) {
     if (game.autopilot && game.autopilot.phase === 1 && game.autopilot.target.entrance.distanceTo(PP.pos) < 90 + PP.radius) { dockAt(game.autopilot.target); return false; }
     // 도킹 안내
     const st = w.nearestStation(PP.pos);
-    if (st && st.pos.distanceTo(PP.pos) < 6000 && !game.autopilot) game.hint = `${st.name} — G: 자동 도킹`;
-    for (const a of w.anoms) if (a.pos.distanceTo(PP.pos) < 600 && !a.looted && (a.type === 'wreck' || a.type === 'cache' || a.type === 'ruins')) game.hint = `${a.name} — G: ${a.type === 'ruins' ? '해킹' : '회수'}`;
+    if (st && st.pos.distanceTo(PP.pos) < 6000 && !game.autopilot) game.hint = `${st.name} — ${DEV.mobile ? '[자동 도킹] 버튼' : 'G: 자동 도킹'}`;
+    for (const a of w.anoms) if (a.pos.distanceTo(PP.pos) < 600 && !a.looted && (a.type === 'wreck' || a.type === 'cache' || a.type === 'ruins')) game.hint = `${a.name} — ${DEV.mobile ? '[자동 도킹] 버튼으로 ' : 'G: '}${a.type === 'ruins' ? '해킹' : '회수'}`;
     S.save.stats.dist += PP.speed * dt;
   } else {
     game.deadT -= dt;
